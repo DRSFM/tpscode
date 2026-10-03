@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+settings.json
+tpscode-install.json
+*.install-*.tmp
+*.source-*.tmp
+report.csv
+report.json
