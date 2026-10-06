@@ -15,11 +15,11 @@ if not errorlevel 1 (
 )
 where python >nul 2>nul
 if not errorlevel 1 (
-    python "%~dp0codex_tps.py" gui
+    python "%~dp0launch.pyw" profiles-audit
     popd
     exit /b 0
 )
-echo Python 3.10+ with tkinter is required. See README.md.
+echo Python 3.11+ with tkinter is required. See README.md.
 pause
 popd
 exit /b 1

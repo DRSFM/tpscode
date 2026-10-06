@@ -5,7 +5,7 @@ $tpsBinDir = Join-Path $env:USERPROFILE '.local/bin'
 $tpsCommandPath = Join-Path $tpsBinDir 'tpscode.cmd'
 $tpsScriptPath = Join-Path $tpsBinDir 'tpscode-launch.ps1'
 $tpsManifestPath = Join-Path $tpsBinDir 'tpscode-install.json'
-$tpsFileNames = @('codex_tps.py', 'desktop.py', 'launch.pyw', 'Start-Codex-TPS.cmd', 'tps.cmd', 'README.md')
+$tpsFileNames = @('codex_tps.py', 'desktop.py', 'launch.pyw', 'window_instance.py', 'Start-Codex-TPS.cmd', 'tps.cmd', 'README.md')
 
 function Copy-TpsAtomic {
     param([string]$tpsCopySource, [string]$tpsCopyTarget)
@@ -88,7 +88,7 @@ if (-not $tpsPathPresent) {
 if (-not (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\', '/') -eq $tpsBinDir.TrimEnd('\', '/') }).Count -gt 0)) {
     $env:Path = $env:Path.TrimEnd(';') + ';' + $tpsBinDir
 }
-Write-Output 'Installed: tpscode (desktop), tpscode list, tpscode watch'
+Write-Output 'Installed: tpscode (all-profile capture), tpscode gui, tpscode list, tpscode watch'
 Write-Output "App: $PSScriptRoot"
 Write-Output "Command: $tpsCommandPath"
 if (-not $tpsPathPresent) {

@@ -9,3 +9,10 @@ tpscode-install.json
 *.source-*.tmp
 report.csv
 report.json
+
+# Context management data (session-local, not committed)
+.ctx/
+
+# Real capture metadata and personal runtime evidence stay local.
+audits/
+validation/

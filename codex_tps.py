@@ -20,6 +20,9 @@ import sys
 import time
 from typing import Any
 
+from reasoning_audit import (AUDIT_FILTERS, AuditMonitor, build_audit_rows, export_audit,
+                             profile_from_home, select_audit, summarize_audit)
+
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / 'settings.json'
 DISPLAY_TZ = timezone(timedelta(hours=8), 'Asia/Hong_Kong')
@@ -81,6 +84,8 @@ class Sample:
     effective_tps: float | None
     visible_tps: float | None
     timing_note: str
+    previous_effort: str = ''
+    previous_model: str = ''
 
     @property
     def end_time(self) -> datetime:
@@ -95,6 +100,9 @@ class LogParser:
         self.client = 'Other'
         self.model = '未记录'
         self.effort = '—'
+        self.previous_effort = ''
+        self.previous_model = ''
+        self.context_turn_id = ''
         self.provider = '未记录'
         self.turn_id = ''
         self.start: datetime | None = None
@@ -121,8 +129,15 @@ class LogParser:
             self.client = client_name(p)
             self.provider = str(p.get('model_provider') or '未记录')
         elif kind == 'turn_context':
-            self.model = str(p.get('model') or self.model)
-            self.effort = str(p.get('effort') or p.get('reasoning_effort') or '—')
+            model = str(p.get('model') or self.model)
+            effort = str(p.get('effort') or p.get('reasoning_effort') or '—')
+            context_turn = str(p.get('turn_id') or self.turn_id)
+            if (context_turn != self.context_turn_id or
+                    model != self.model or effort != self.effort):
+                self.previous_effort = self.effort if self.effort != '—' and model == self.model else ''
+                self.previous_model = self.model if self.model != '未记录' else ''
+            self.model, self.effort = model, effort
+            self.context_turn_id = context_turn
             self.turn_id = str(p.get('turn_id') or self.turn_id)
         elif kind == 'response_item' and t:
             self._item(p, t)
@@ -240,7 +255,8 @@ class LogParser:
             provider=self.provider, home=self.home, log_path=str(self.path), output_tokens=output,
             reasoning_tokens=reasoning, visible_tokens=visible, input_tokens=token_number(tokens.get('input_tokens')),
             duration_seconds=seconds, effective_tps=output / seconds if seconds else None,
-            visible_tps=visible / seconds if visible is not None and seconds else None, timing_note=note))
+            visible_tps=visible / seconds if visible is not None and seconds else None, timing_note=note,
+            previous_effort=self.previous_effort, previous_model=self.previous_model))
         fp = fingerprint(total)
         if fp:
             self.last_total, self.last_fingerprint = dict(total), fp
@@ -295,13 +311,15 @@ class FileState:
 
 
 class Monitor:
-    def __init__(self, homes: list[Path], include_archived: bool = False):
+    def __init__(self, homes: list[Path], include_archived: bool = False, audit_paths: list[Path] | None = None):
         self.homes = homes
         self.include_archived = include_archived
         self.files: dict[str, FileState] = {}
         self.errors: list[str] = []
         self.bad_lines = 0
         self.file_count = 0
+        self.audit_monitor = AuditMonitor(audit_paths)
+        self.audit_rows = []
 
     def _paths(self, since: datetime | None):
         seen = set()
@@ -371,7 +389,11 @@ class Monitor:
             for sample in state.parser.records:
                 if since is None or sample.end_time >= since:
                     unique.setdefault(sample.uid, sample)
-        return sorted(unique.values(), key=lambda s: (s.completed_at, s.uid), reverse=True)
+        samples = sorted(unique.values(), key=lambda s: (s.completed_at, s.uid), reverse=True)
+        self.audit_rows = build_audit_rows(samples, self.audit_monitor.refresh(since))
+        self.errors.extend(self.audit_monitor.errors)
+        self.bad_lines += self.audit_monitor.bad_lines
+        return samples
 
 
 def select_samples(samples: list[Sample], client: str = 'all', model: str = '', session: str = '',
@@ -482,10 +504,36 @@ def main(argv: list[str] | None = None) -> int:
     common.add_argument('--session', default='', help='按会话 ID 筛选（部分匹配）')
     common.add_argument('--days', type=nonnegative_float, default=7, help='最近天数，0 表示全部；默认 7')
     common.add_argument('--archived', action='store_true', help='包含 archived_sessions')
+    common.add_argument('--audit-log', action='append', default=[], help='审计 JSONL 文件或目录，可重复')
+    common.add_argument('--audit-status', choices=tuple(AUDIT_FILTERS.values()), default='all', help='筛选审计结果')
+    common.add_argument('--profile', default='', help='按完整 Profile 名称筛选审计或速度记录')
     sub = parser.add_subparsers(dest='command')
     gui = sub.add_parser('gui', parents=[common], help='打开原生桌面窗口（默认）')
     gui.add_argument('--smoke-report', type=Path, help=argparse.SUPPRESS)
     gui.add_argument('--screenshot', type=Path, help=argparse.SUPPRESS)
+    gui.add_argument('--view', choices=('speed', 'audit'), default='speed', help='桌面初始视图')
+    auditing = sub.add_parser('audit', parents=[common], help='查看思考等级审计与配置变化')
+    auditing.add_argument('--limit', type=nonnegative_int, default=25)
+    auditing.add_argument('--json', action='store_true')
+    capture = sub.add_parser('capture', help='手动启动仅监听本机的 HTTP/SSE/WebSocket 审计采集入口')
+    capture.add_argument('--upstream', required=True, help='实际提供商 API base URL，例如 https://provider.example/v1')
+    capture.add_argument('--audit-log', type=Path, required=True, help='写入脱敏审计 JSONL 文件')
+    capture.add_argument('--port', type=nonnegative_int, default=8766)
+    capture.add_argument('--client', choices=('desktop', 'cli', 'other'), default='other', help='手动标注来源客户端')
+    capture.add_argument('--timeout', type=positive_float, default=1800, help='上游读取超时 / 秒')
+    capture.add_argument('--profile-name', default='', help='手动采集入口的 Profile 标签')
+    official = sub.add_parser('official-audit', help='临时接入默认官方账号桌面的真实请求，关闭后恢复配置')
+    official.add_argument('--codex-home', type=Path, default=Path.home() / '.codex', help='官方登录目录，默认 ~/.codex')
+    official.add_argument('--audit-log', type=Path, default=APP_DIR / 'audits' / 'official-desktop.jsonl')
+    official.add_argument('--port', type=nonnegative_int, default=8766)
+    official.add_argument('--restore', action='store_true', help='恢复本工具写入的临时配置，用于异常退出后恢复')
+    official.add_argument('--no-gui', action='store_true', help='仅启动采集服务；Ctrl+C 恢复配置')
+    profiles = sub.add_parser('profiles-audit', help='统一采集默认官方及全部 API/账号 Profiles，关闭后恢复配置')
+    profiles.add_argument('--user-home', type=Path, default=Path.home(), help='发现 .codex / .codex-api 的用户目录')
+    profiles.add_argument('--state-dir', type=Path, default=APP_DIR / 'audits', help='脱敏日志与 URL 恢复记录目录')
+    profiles.add_argument('--port', type=nonnegative_int, default=8766, help='默认官方入口端口；其他入口自动分配')
+    profiles.add_argument('--restore', action='store_true', help='异常退出后恢复所有本工具接入的配置')
+    profiles.add_argument('--no-gui', action='store_true')
     listing = sub.add_parser('list', parents=[common], help='查看最近的模型响应')
     listing.add_argument('--limit', type=nonnegative_int, default=25, help='显示条数，0 为全部')
     listing.add_argument('--json', action='store_true', help='输出 JSON')
@@ -497,13 +545,40 @@ def main(argv: list[str] | None = None) -> int:
     export.add_argument('--format', choices=('json', 'csv'), default='csv')
     export.add_argument('--output', type=Path, required=True)
     export.add_argument('--overwrite', action='store_true')
+    export.add_argument('--view', choices=('speed', 'audit'), default='speed', help='导出速度统计或审计记录')
     sub.add_parser('diagnose', parents=[common], help='检查会话来源和格式识别情况')
     requested = argv if argv is not None else sys.argv[1:]
     args = parser.parse_args(requested or ['gui'])
+    if args.command == 'profiles-audit':
+        from profiles_capture import run_profiles_audit
+        try:
+            return run_profiles_audit(args.user_home, args.state_dir, port=args.port, restore=args.restore, no_gui=args.no_gui)
+        except (OSError, ValueError, OverflowError):
+            print('统一采集无法启动：请检查采集状态或先运行 profiles-audit --restore；未输出配置原文。', file=sys.stderr)
+            return 1
+    if args.command == 'official-audit':
+        from official_desktop import run_official_audit
+        try:
+            return run_official_audit(args.codex_home, args.audit_log, args.port,
+                                      restore=args.restore, no_gui=args.no_gui)
+        except (OSError, ValueError, OverflowError) as exc:
+            print(f'官方桌面审计无法启动：{exc}', file=sys.stderr)
+            return 1
+    if args.command == 'capture':
+        from audit_capture import run_capture
+        try:
+            return run_capture(args.upstream, args.audit_log, args.port,
+                               {'desktop':'Desktop', 'cli':'CLI', 'other':'Other'}[args.client], args.timeout, args.profile_name)
+        except (OSError, ValueError, OverflowError) as exc:
+            print(f'采集入口无法启动：{exc}', file=sys.stderr)
+            return 1
     settings = load_settings()
     extra = [Path(p) for p in args.home + settings.get('extra_homes', []) if isinstance(p, str)]
     homes = discover_homes(extra=extra)
-    monitor = Monitor(homes, args.archived)
+    saved_audit = settings.get('audit_logs', [])
+    saved_audit = saved_audit if isinstance(saved_audit, list) else []
+    audit_paths = [Path(p).expanduser() for p in args.audit_log + saved_audit if isinstance(p, str)]
+    monitor = Monitor(homes, args.archived, audit_paths)
     if args.command == 'gui':
         from desktop import run_gui
         return run_gui(monitor, args)
@@ -514,7 +589,27 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == 'watch':
                 monitor.homes = discover_homes(extra=homes)
             samples = select_samples(monitor.refresh(cutoff(args.days)), args.client, args.model, args.session)
+            if args.profile:
+                samples = [s for s in samples if (profile_from_home(s.home) or '未记录') == args.profile]
             summary = summarize(samples)
+            audit_rows = select_audit(monitor.audit_rows, args.client, args.model, args.session, status=args.audit_status, profile=args.profile)
+            if args.command == 'audit':
+                rows = audit_rows[:args.limit] if args.limit else audit_rows
+                if args.json:
+                    print(json.dumps(dict(schema_version=1, metric='reasoning_effort_audit',
+                                          summary=summarize_audit(audit_rows), records=[r.to_dict() for r in rows],
+                                          warnings=monitor.errors, bad_records=monitor.bad_lines),
+                                     ensure_ascii=False, allow_nan=False))
+                else:
+                    print('Codex TPS · 思考等级审计（回显差异与配置变化）\n')
+                    for r in rows:
+                        print(f'{local_time(r.completed_at)}  {r.client:7}  [{r.profile or "未记录"}]  {r.model:25}  '
+                              f'出站 {r.outbound_effort or "未采集"}  首包 {r.first_display}  '
+                              f'最终 {r.final_effort or "未返回"}  思考 {number(r.reasoning_tokens, 0)}  {r.audit_result}')
+                    count = summarize_audit(audit_rows)
+                    print(f'\n{len(audit_rows)} 条记录 / {count["comparable_count"]} 条可比 / '
+                          f'{count["lowered_count"]} 条回显降低 / {count["config_lowered_count"]} 条配置降低')
+                break
             if args.command == 'list':
                 if args.json:
                     rows = samples[:args.limit] if args.limit else samples
@@ -530,12 +625,16 @@ def main(argv: list[str] | None = None) -> int:
                         print('没有匹配的响应。可尝试 --days 0 或 --home 你的Codex目录。')
                 break
             if args.command == 'export':
-                export_samples(samples, args.output, args.format, overwrite=args.overwrite)
-                print(f'已导出 {len(samples)} 次响应 → {args.output.resolve()}')
+                if args.view == 'audit':
+                    export_audit(audit_rows, args.output, args.format, overwrite=args.overwrite)
+                else:
+                    export_samples(samples, args.output, args.format, overwrite=args.overwrite)
+                print(f'已导出 {len(audit_rows) if args.view == "audit" else len(samples)} 条 → {args.output.resolve()}')
                 break
             if args.command == 'diagnose':
                 print(json.dumps({'homes': [str(p) for p in homes], 'scanned_files': monitor.file_count,
                                   'summary': summary, 'clients': sorted({s.client for s in samples}),
+                                  'audit_logs': [str(p) for p in audit_paths], 'audit_summary': summarize_audit(audit_rows),
                                   'bad_records': monitor.bad_lines, 'warnings': monitor.errors},
                                  ensure_ascii=False, indent=2))
                 break

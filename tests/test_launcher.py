@@ -1,13 +1,55 @@
 import json
 import os
+import runpy
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 LAUNCHER = Path(__file__).resolve().parents[1] / 'tpscode.cmd'
 GLOBAL_LAUNCHER = LAUNCHER.with_name('global-launch.cmd')
 GLOBAL_SCRIPT = LAUNCHER.with_name('global-launch.ps1')
+
+
+class WindowedLauncherTests(unittest.TestCase):
+    def setUp(self):
+        focus = patch('window_instance.focus_profiles_window', return_value=False)
+        self.focus = focus.start()
+        self.addCleanup(focus.stop)
+
+    def test_no_arguments_start_all_profiles_capture(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        with patch('sys.argv', [str(entry)]), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        main.assert_called_once_with(['profiles-audit'])
+
+    def test_running_capture_window_is_reused_without_starting_another_manager(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        self.focus.return_value = True
+        with patch('sys.argv', [str(entry)]), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        self.focus.assert_called_once()
+        main.assert_not_called()
+
+    def test_explicit_readonly_gui_does_not_reuse_capture_window(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        with patch('sys.argv', [str(entry), 'gui']), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        main.assert_called_once_with(['gui'])
+        self.focus.assert_not_called()
+
+    def test_official_audit_arguments_reach_application_instead_of_default_readonly_gui(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        with patch('sys.argv', [str(entry), 'official-audit']), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        main.assert_called_once_with(['official-audit'])
+
+    def test_profiles_audit_arguments_reach_unified_capture(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        with patch('sys.argv', [str(entry), 'profiles-audit']), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        main.assert_called_once_with(['profiles-audit'])
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows command launcher')
@@ -103,6 +145,19 @@ class LauncherTests(unittest.TestCase):
             result = self.launch(path, env=dict(os.environ, LOCALAPPDATA=str(base/'missing')))
             self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
             self.assertIn('DESKTOP', result.stdout)
+
+    def test_console_fallback_also_starts_all_profiles_capture(self):
+        with tempfile.TemporaryDirectory(prefix='TPS launch ') as folder:
+            base = Path(folder)
+            bin_dir = base / 'bin'
+            bin_dir.mkdir()
+            (bin_dir / 'python.cmd').write_text('@echo off\necho PYTHON:%*\nexit /b 0\n', encoding='ascii')
+            path = base / 'Start-Codex-TPS.cmd'
+            path.write_bytes(LAUNCHER.with_name('Start-Codex-TPS.cmd').read_bytes())
+            env = dict(os.environ, PATH=str(bin_dir) + ';' + str(Path(os.environ['SystemRoot']) / 'System32'))
+            result = self.launch(path, env=env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('profiles-audit', result.stdout)
 
     def test_missing_app_reports_the_paths_it_checked(self):
         with tempfile.TemporaryDirectory(prefix='TPS launch ') as folder:

@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from codex_tps import (APP_DIR, CONFIG_PATH, DISPLAY_TZ, Monitor, Sample, cutoff, discover_homes, export_samples,
                        load_settings, local_time, number, select_samples, summarize)
+from reasoning_audit import (AUDIT_FILTERS, AuditRecord, export_audit, profile_from_home, select_audit, summarize_audit)
 
 BG = '#10151f'
 PANEL = '#19212e'
@@ -39,6 +40,8 @@ class Desktop:
         self.ui_scale = max(1.0, root.winfo_fpixels('1i') / 96)
         self.samples: list[Sample] = []
         self.filtered: list[Sample] = []
+        self.audit_rows: list[AuditRecord] = []
+        self.audit_filtered: list[AuditRecord] = []
         self.mailbox = queue.Queue()
         self.busy = False
         self.closed = False
@@ -51,17 +54,21 @@ class Desktop:
         self.loaded_revision = -1
         self.delay_id = None
         self.failure = ''
+        self.view = tk.StringVar(value='思考审计' if args.view == 'audit' else '速度统计')
+        self.audit_status = tk.StringVar(value=next(k for k, v in AUDIT_FILTERS.items() if v == args.audit_status))
         self.auto = tk.BooleanVar(value=True)
         self.archived = tk.BooleanVar(value=args.archived)
         self.client = tk.StringVar(value={'all': '全部客户端', 'desktop': 'Desktop', 'cli': 'CLI', 'other': '其他'}[args.client])
         self.model = tk.StringVar(value='全部模型')
         self.source = tk.StringVar(value='全部来源')
+        self.profile = tk.StringVar(value=getattr(args, 'profile', '') or '全部 Profile')
         self.session = tk.StringVar(value=args.session)
         self.periods = {'最近24小时': 1, '最近7天': 7, '最近30天': 30, '全部历史': 0}
         if args.days not in self.periods.values():
             self.periods[f'最近{args.days:g}天'] = args.days
         self.period = tk.StringVar(value=next(k for k, v in self.periods.items() if v == args.days))
-        root.title('Codex TPS · Desktop / CLI')
+        root.title('Codex TPS · 全部 Profiles 审计' if getattr(args, 'profiles_audit', False) else
+                   'Codex TPS · 官方账号真实审计' if getattr(args, 'official_audit', False) else 'Codex TPS · Desktop / CLI')
         width = min(round(1240 * self.ui_scale), root.winfo_screenwidth() - 80)
         height = min(round(860 * self.ui_scale), root.winfo_screenheight() - 100)
         root.geometry(f'{width}x{height}+40+40')
@@ -122,7 +129,11 @@ class Desktop:
         top.grid(row=0, column=0, sticky='ew', pady=(0, 20))
         top.columnconfigure(0, weight=1)
         self.label(top, 'Codex TPS', size=25, bold=True).grid(row=0, column=0, sticky='w')
-        self.label(top, '本地会话监控  /  Desktop + CLI', color=MUTED).grid(row=1, column=0, sticky='w', pady=(4, 0))
+        caption = ('全部 Profiles · 各桌面重启后开始采集；关闭本窗口恢复连接配置'
+                   if getattr(self.args, 'profiles_audit', False) else
+                   '官方账号审计 · 重启官方桌面后发送消息；关闭本窗口会恢复连接配置'
+                   if getattr(self.args, 'official_audit', False) else '本地会话监控  /  Desktop + CLI')
+        self.label(top, caption, color=MUTED).grid(row=1, column=0, sticky='w', pady=(4, 0))
         actions = ttk.Frame(top)
         actions.grid(row=0, column=1, rowspan=2)
         ttk.Checkbutton(actions, text='自动刷新 · 2 秒', variable=self.auto,
@@ -130,21 +141,31 @@ class Desktop:
         self.refresh_button = ttk.Button(actions, text='刷新', command=self.request_refresh)
         self.refresh_button.pack(side='left', padx=(0, 8))
         ttk.Button(actions, text='导出 CSV', command=self.export, style='Accent.TButton').pack(side='left')
+        if getattr(self.args, 'official_audit', False) or getattr(self.args, 'profiles_audit', False):
+            ttk.Button(actions, text='停止并恢复配置', command=self.close).pack(side='left', padx=(8, 0))
+        if getattr(self.args, 'profiles_audit', False):
+            ttk.Button(actions, text='采集状态', command=self.show_capture_status).pack(side='left', padx=(8, 0))
 
         metrics = ttk.Frame(shell)
         metrics.grid(row=1, column=0, sticky='ew', pady=(0, 18))
         self.metric_vars = []
         self.metric_subs = []
+        self.metric_labels = []
+        self.metric_value_labels = []
         labels = ['最近一次有效 TPS', '加权平均有效 TPS', '已统计模型响应', '已识别会话']
         for col, text in enumerate(labels):
             metrics.columnconfigure(col, weight=1, uniform='metrics')
             panel = tk.Frame(metrics, background=PANEL, highlightbackground=FAINT, highlightthickness=1)
             panel.grid(row=0, column=col, sticky='nsew', padx=(0 if col == 0 else 6, 0 if col == 3 else 6))
-            self.label(panel, text, color=MUTED, size=10, background=PANEL).pack(anchor='w', padx=16, pady=(14, 4))
+            caption = self.label(panel, text, color=MUTED, size=10, background=PANEL)
+            caption.pack(anchor='w', padx=16, pady=(14, 4))
+            self.metric_labels.append(caption)
             value = tk.StringVar(value='—')
             self.metric_vars.append(value)
-            tk.Label(panel, textvariable=value, background=PANEL, foreground=GREEN if col < 2 else TEXT,
-                     font=('Consolas', 34, 'bold'), anchor='w').pack(fill='x', padx=16)
+            value_label = tk.Label(panel, textvariable=value, background=PANEL, foreground=GREEN if col < 2 else TEXT,
+                                   font=('Consolas', 34, 'bold'), anchor='w')
+            value_label.pack(fill='x', padx=16)
+            self.metric_value_labels.append(value_label)
             sub = tk.StringVar(value='正在读取会话…')
             self.metric_subs.append(sub)
             tk.Label(panel, textvariable=sub, background=PANEL, foreground=MUTED,
@@ -155,13 +176,15 @@ class Desktop:
         self.client_box = ttk.Combobox(filters, textvariable=self.client,
                                       values=('全部客户端', 'Desktop', 'CLI', '其他'), state='readonly', width=12)
         self.client_box.pack(side='left', padx=(0, 8))
+        self.profile_box = ttk.Combobox(filters, textvariable=self.profile, values=('全部 Profile',), state='readonly', width=17)
+        self.profile_box.pack(side='left', padx=(0, 8))
         self.model_box = ttk.Combobox(filters, textvariable=self.model, values=('全部模型',), state='readonly', width=24)
         self.model_box.pack(side='left', padx=(0, 8))
         self.source_box = ttk.Combobox(filters, textvariable=self.source, values=('全部来源',), state='readonly', width=17)
         self.source_box.pack(side='left', padx=(0, 8))
         self.period_box = ttk.Combobox(filters, textvariable=self.period, values=tuple(self.periods), state='readonly', width=11)
         self.period_box.pack(side='left', padx=(0, 8))
-        for box in (self.client_box, self.model_box, self.source_box):
+        for box in (self.client_box, self.profile_box, self.model_box, self.source_box):
             box.bind('<<ComboboxSelected>>', lambda _: self.apply_filters())
         self.period_box.bind('<<ComboboxSelected>>', self.scope_changed)
         ttk.Button(filters, text='+ 日志目录', command=self.add_home).pack(side='right')
@@ -173,9 +196,18 @@ class Desktop:
         self.session.trace_add('write', self.filter_changed)
         ttk.Checkbutton(options, text='包含已归档会话', variable=self.archived,
                         command=self.scope_changed).pack(side='left', padx=16)
-        self.label(options, '有效 TPS = 输出 token ÷ 模型响应耗时', color=MUTED, size=9).pack(side='right')
+        self.view_box = ttk.Combobox(options, textvariable=self.view, values=('速度统计', '思考审计'),
+                                     state='readonly', width=10)
+        self.view_box.pack(side='left', padx=(0, 8))
+        self.view_box.bind('<<ComboboxSelected>>', lambda _: self.apply_filters())
+        self.audit_status_box = ttk.Combobox(options, textvariable=self.audit_status,
+                                             values=tuple(AUDIT_FILTERS), state='readonly', width=17)
+        self.audit_status_box.pack(side='left', padx=(0, 8))
+        self.audit_status_box.bind('<<ComboboxSelected>>', lambda _: self.apply_filters())
+        ttk.Button(options, text='+ 审计日志', command=self.add_audit_log).pack(side='right')
 
         plot_panel = tk.Frame(shell, background=PANEL, highlightbackground=FAINT, highlightthickness=1)
+        self.plot_panel = plot_panel
         plot_panel.grid(row=4, column=0, sticky='ew', pady=(0, 14))
         plot_header = tk.Frame(plot_panel, background=PANEL)
         plot_header.pack(fill='x', padx=16, pady=(12, 0))
@@ -196,16 +228,27 @@ class Desktop:
         table_frame.grid(row=5, column=0, sticky='nsew')
         table_frame.rowconfigure(0, weight=1)
         table_frame.columnconfigure(0, weight=1)
-        columns = ('time', 'client', 'model', 'effort', 'tps', 'visible', 'output', 'reasoning', 'duration', 'session')
+        self.speed_columns = ('time', 'client', 'profile', 'model', 'effort', 'tps', 'visible', 'output', 'reasoning', 'duration', 'session')
+        self.audit_columns = ('time', 'client', 'profile', 'model', 'outbound', 'first', 'final', 'reasoning', 'audit')
+        columns = self.speed_columns + ('outbound', 'first', 'final', 'audit')
         self.table = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='browse', height=7)
-        titles = ('完成时间', '客户端', '模型', '模式', '有效 TPS', '可见 TPS', '输出 token', '思考 token', '耗时 / 秒', '会话 ID')
-        widths = (122, 88, 210, 70, 86, 86, 85, 85, 86, 126)
-        for column, title, width in zip(columns, titles, widths):
+        titles = ('完成时间', '客户端', 'Profile', '模型', '模式', '有效 TPS', '可见 TPS', '输出 token', '思考 token', '耗时 / 秒', '会话 ID')
+        widths = (122, 88, 110, 195, 70, 86, 86, 85, 85, 86, 126)
+        for column, title, width in zip(self.speed_columns, titles, widths):
             self.table.heading(column, text=title)
-            self.table.column(column, width=round(width*self.ui_scale), minwidth=round(58*self.ui_scale), anchor='w' if column in ('time', 'client', 'model', 'session') else 'e',
+            self.table.column(column, width=round(width*self.ui_scale), minwidth=round(58*self.ui_scale), anchor='w' if column in ('time', 'client', 'profile', 'model', 'session') else 'e',
                               stretch=column == 'model')
         self.table.tag_configure('even', background=PANEL)
         self.table.tag_configure('odd', background='#1d2735')
+        for column, title, width in (('outbound','出站等级',95), ('first','首包回显',95),
+                                      ('final','最终回显',95), ('audit','审计结果',320)):
+            self.table.heading(column, text=title)
+            self.table.column(column, width=round(width*self.ui_scale), minwidth=round(70*self.ui_scale),
+                              anchor='w', stretch=column == 'audit')
+        for tag, color in (('lowered','#ffc3c3'), ('config_lowered',YELLOW), ('raised',BLUE),
+                           ('match',GREEN), ('changed',YELLOW), ('unknown',MUTED),
+                           ('failed','#ffc3c3'), ('incomplete',YELLOW), ('in_progress',BLUE)):
+            self.table.tag_configure(tag, foreground=color)
         self.table.grid(row=0, column=0, sticky='nsew')
         scrollbar = ttk.Scrollbar(table_frame, orient='vertical', command=self.table.yview)
         scrollbar.grid(row=0, column=1, sticky='ns')
@@ -220,7 +263,7 @@ class Desktop:
         bottom.grid(row=6, column=0, sticky='ew', pady=(12, 0))
         self.status = self.label(bottom, '正在扫描会话目录…', color=MUTED, size=9)
         self.status.pack(side='left')
-        self.label(bottom, '只读本地日志 · 不发起 API 请求', color=MUTED, size=9).pack(side='right')
+        self.label(bottom, '只读日志 · 配置变化与回显分开判断', color=MUTED, size=9).pack(side='right')
         self.detail = self.label(shell, '选择一条响应，可查看完整会话 ID 和来源目录。', color=MUTED, size=9,
                                  wraplength=round(1150*self.ui_scale), justify='left')
         self.detail.grid(row=7, column=0, sticky='ew', pady=(8, 0))
@@ -246,9 +289,10 @@ class Desktop:
         def worker():
             try:
                 self.monitor.include_archived = archive
-                self.monitor.homes = discover_homes(extra=self.monitor.homes)
+                if not getattr(self.args, 'fixed_homes', False):
+                    self.monitor.homes = discover_homes(user_home=getattr(self.args, 'user_home', None), extra=self.monitor.homes)
                 data = self.monitor.refresh(cutoff(period))
-                self.mailbox.put(('data', data, revision))
+                self.mailbox.put(('data', (data, self.monitor.audit_rows), revision))
             except Exception as exc:
                 self.mailbox.put(('error', f'{type(exc).__name__}: {exc}', revision))
 
@@ -264,7 +308,7 @@ class Desktop:
             self.loaded_revision = revision
             if kind == 'data' and revision == self.refresh_revision:
                 self.failure = ''
-                self.samples = payload
+                self.samples, self.audit_rows = payload
                 self.update_choices()
                 self.apply_filters()
                 if self.args.smoke_report and not self.smoked:
@@ -283,12 +327,20 @@ class Desktop:
     def tick(self):
         if self.closed:
             return
+        if getattr(self.args, 'capture_stopped', None) and self.args.capture_stopped():
+            self.close()
+            return
         if self.auto.get():
             self.request_refresh()
         self.root.after(2000, self.tick)
 
     def update_choices(self):
-        models = sorted({s.model for s in self.samples})
+        names = {r.profile or '未记录' for r in self.audit_rows} | {profile_from_home(s.home) or '未记录' for s in self.samples}
+        names.update(getattr(self.args, 'profile_names', []))
+        self.profile_box.configure(values=['全部 Profile'] + sorted(names))
+        if self.profile.get() not in ['全部 Profile'] + sorted(names):
+            self.profile.set('全部 Profile')
+        models = sorted({s.model for s in self.samples} | {r.model for r in self.audit_rows})
         self.model_box.configure(values=['全部模型'] + models)
         if self.args.model and self.model.get() == '全部模型':
             match = next((m for m in models if self.args.model.lower() in m.lower()), None)
@@ -298,7 +350,7 @@ class Desktop:
         if self.model.get() not in ['全部模型'] + models:
             self.model.set('全部模型')
         self.home_values = {'全部来源': ''}
-        for home in sorted({s.home for s in self.samples}):
+        for home in sorted({s.home for s in self.samples} | {r.home for r in self.audit_rows}):
             label = home_label(home)
             if label in self.home_values:
                 label = home
@@ -311,8 +363,21 @@ class Desktop:
         self.delay_id = None
         client = {'全部客户端': 'all', 'Desktop': 'desktop', 'CLI': 'cli', '其他': 'other'}[self.client.get()]
         model = '' if self.model.get() == '全部模型' else self.model.get()
-        self.filtered = select_samples(self.samples, client, model, self.session.get().strip(),
+        profile = '' if self.profile.get() == '全部 Profile' else self.profile.get()
+        candidates = [s for s in self.samples if not profile or (profile_from_home(s.home) or '未记录') == profile]
+        self.filtered = select_samples(candidates, client, model, self.session.get().strip(),
                                        self.home_values.get(self.source.get(), ''))
+        self.audit_filtered = select_audit(self.audit_rows, client, model, self.session.get().strip(),
+                                           self.home_values.get(self.source.get(), ''),
+                                           AUDIT_FILTERS[self.audit_status.get()], profile)
+        auditing = self.view.get() == '思考审计'
+        self.audit_status_box.configure(state='readonly' if auditing else 'disabled')
+        self.table.configure(displaycolumns=self.audit_columns if auditing else self.speed_columns)
+        self.table.heading('model', text='请求 / 配置模型' if auditing else '模型')
+        if auditing:
+            self.plot_panel.grid_remove()
+        else:
+            self.plot_panel.grid()
         summary = summarize(self.filtered)
         latest = self.filtered[0] if self.filtered else None
         values = [number(summary['latest_tps']), number(summary['weighted_tps']),
@@ -321,36 +386,72 @@ class Desktop:
                      f'{summary["timed_count"]:,} 次有有效时间边界 · tokens/s',
                      f'共 {summary["output_tokens"]:,} 个输出 token',
                      f'已扫描 {self.monitor.file_count} 个日志文件']
+        titles = ['最近一次有效 TPS', '加权平均有效 TPS', '已统计模型响应', '已识别会话']
+        if auditing:
+            audit_summary = summarize_audit(self.audit_filtered)
+            values = [f'{audit_summary["comparable_count"]:,}', f'{audit_summary["lowered_count"]:,}',
+                      f'{audit_summary["config_lowered_count"]:,}', f'{audit_summary["unknown_count"]:,}']
+            coverage = audit_summary['coverage']
+            titles = ['可比审计记录', '回显等级降低', '配置等级降低', '无法审计']
+            subtitles = [f'共 {len(self.audit_filtered):,} 条 · 覆盖率 {coverage:.0%}' if coverage is not None else '等待日志',
+                         '实际出站与最终回显的字段差异', '本地配置变化 · 原因无法判断',
+                         f'{audit_summary["changed_count"]:,} 条首末回显变化']
+        for label, title in zip(self.metric_labels, titles):
+            label.configure(text=title)
+        colors = (GREEN, '#ffb4b4', YELLOW, MUTED) if auditing else (GREEN, GREEN, TEXT, TEXT)
+        for label, color in zip(self.metric_value_labels, colors):
+            label.configure(foreground=color)
         for var, value, sub, text in zip(self.metric_vars, values, self.metric_subs, subtitles):
             var.set(value)
             sub.set(text)
-        signature = tuple(s.uid for s in self.filtered[:300])
+        displayed = self.audit_filtered if auditing else self.filtered
+        signature = (auditing, tuple(json.dumps(s.to_dict() if auditing else asdict(s), sort_keys=True,
+                                                ensure_ascii=False) for s in displayed[:300]))
         if signature != getattr(self, 'table_signature', None):
             selected = self.table.selection()
             y = self.table.yview()[0]
             self.table.delete(*self.table.get_children())
-            for i, s in enumerate(self.filtered[:300]):
-                row = (local_time(s.completed_at), s.client, s.model, s.effort, number(s.effective_tps),
+            for i, s in enumerate(displayed[:300]):
+                tags = ['even' if i % 2 == 0 else 'odd']
+                if auditing:
+                    data = dict(time=local_time(s.completed_at), client=s.client, profile=s.profile or '未记录', model=s.model,
+                                outbound=s.outbound_effort or '未采集', first=s.first_display,
+                                final=s.final_effort or '未返回', reasoning=number(s.reasoning_tokens, 0),
+                                audit='  ' + s.audit_result)
+                    row = tuple(data.get(column, '') for column in self.table['columns'])
+                    tags.append('changed' if s.audit_status == 'match' and s.first_final_change else s.audit_status)
+                else:
+                    row = (local_time(s.completed_at), s.client, profile_from_home(s.home) or '未记录', s.model, s.effort, number(s.effective_tps),
                        number(s.visible_tps), f'{s.output_tokens:,}',
                        f'{s.reasoning_tokens:,}' if s.reasoning_tokens is not None else '—',
-                       number(s.duration_seconds), s.session_id[:12])
-                self.table.insert('', 'end', iid=s.uid, values=row, tags=('even' if i % 2 == 0 else 'odd',))
+                       number(s.duration_seconds), s.session_id[:12]) + ('', '', '', '')
+                self.table.insert('', 'end', iid=s.uid, values=row, tags=tuple(tags))
             self.table_signature = signature
             if selected and self.table.exists(selected[0]):
                 self.table.selection_set(selected[0])
             self.table.yview_moveto(y)
-        if self.filtered:
+        if displayed:
             self.empty_label.place_forget()
         else:
-            self.empty_label.configure(text='没有匹配的响应。试试“全部历史”，或添加 Codex 日志目录。')
+            self.empty_label.configure(text='没有匹配的记录。可调整筛选，或添加会话 / 审计日志。')
             self.empty_label.place(relx=.5, rely=.35, anchor='center')
         warnings = len(self.monitor.errors) + self.monitor.bad_lines
         status = f'监控中 · 每 2 秒刷新' if self.auto.get() else '自动刷新已暂停'
-        status += f'  |  展示最近 {min(300, len(self.filtered))} 条，导出包含全部'
+        status += f'  |  展示最近 {min(300, len(displayed))} 条，导出包含全部'
+        if getattr(self.args, 'capture_status', None):
+            targets = self.args.capture_status()
+            self.args.profile_names = [item['profile'] for item in targets]
+            status += f'  |  {sum(item["state"] == "采集中" for item in targets)} 个 Profile 采集中'
         if warnings:
             status += f'  |  {warnings} 条读取提示（详见 CLI diagnose）'
         self.status.configure(text=status, foreground=MUTED if not warnings else YELLOW)
         self.draw_chart()
+        if self.table.selection():
+            self.select_row()
+        elif auditing:
+            self.detail.configure(text='配置等级来自会话日志；出站、首包和最终回显需要审计日志。回显差异不证明实际计算量或模型身份。')
+        else:
+            self.detail.configure(text='选择一条响应，可查看完整会话 ID 和来源目录。')
 
     def draw_chart(self):
         c = self.canvas
@@ -411,11 +512,24 @@ class Desktop:
         if not selection:
             return
         self.selected_uid = selection[0]
+        if self.view.get() == '思考审计':
+            r = next((r for r in self.audit_filtered if r.uid == selection[0]), None)
+            if r:
+                self.detail.configure(text=f'会话 {r.session_id or "未关联"}  ·  请求 {r.request_id or "未采集"} / 尝试 {r.attempt_id or "—"}  ·  响应 {r.response_id or "未采集"}\n'
+                    f'Profile {r.profile or "未记录"}  ·  配置 {r.configured_effort or "未记录"}  ·  出站 {r.outbound_effort or "未采集"}  ·  首包 {r.first_display}  ·  最终 {r.final_effort or "未返回"}  ·  有效配置更新 {r.effective_effort or "未记录"}\n'
+                    f'模型依据 {"实际请求" if r.model_origin == "request" else "会话配置"}  ·  观测边界 {r.observation_boundary or "未采集"}  ·  首末变化 {r.first_final_change or "无已知变化"}  ·  {r.audit_result}\n'
+                    f'{r.note}\n来源：{r.source_path}')
+            return
         s = next((s for s in self.filtered if s.uid == selection[0]), None)
         if s:
             self.detail.configure(text=f'会话 {s.session_id}  ·  提供商 ID: {s.provider}  ·  '
                                   f'来源: {s.home}\n{s.timing_note}')
             self.draw_chart()
+
+    def show_capture_status(self):
+        rows = self.args.capture_status()
+        text = '\n'.join(f'{row["profile"]}：{row["state"]}' + (f' · {row["reason"]}' if row.get('reason') else '') for row in rows)
+        messagebox.showinfo('Profiles 采集状态', text or '没有发现可接入的 Profile。', parent=self.root)
 
     def add_home(self):
         selected = filedialog.askdirectory(parent=self.root, title='选择 Codex home 或 sessions 日志目录')
@@ -441,16 +555,44 @@ class Desktop:
         self.scope_changed()
 
     def export(self):
+        auditing = self.view.get() == '思考审计'
         path = filedialog.asksaveasfilename(parent=self.root, title='导出筛选后的全部响应',
-            initialdir=str(APP_DIR), initialfile=f'codex-tps-{datetime.now(DISPLAY_TZ).strftime("%Y%m%d-%H%M%S")}.csv',
+            initialdir=str(APP_DIR), initialfile=f'codex-{"audit" if auditing else "tps"}-{datetime.now(DISPLAY_TZ).strftime("%Y%m%d-%H%M%S")}.csv',
             defaultextension='.csv', filetypes=[('CSV 表格', '*.csv'), ('JSON 数据', '*.json')])
         if not path:
             return
         try:
-            export_samples(self.filtered, Path(path), 'json' if path.lower().endswith('.json') else 'csv', overwrite=True)
-            self.status.configure(text=f'已导出 {len(self.filtered)} 条 → {Path(path).name}', foreground=GREEN)
+            rows = self.audit_filtered if auditing else self.filtered
+            writer = export_audit if auditing else export_samples
+            writer(rows, Path(path), 'json' if path.lower().endswith('.json') else 'csv', overwrite=True)
+            self.status.configure(text=f'已导出 {len(rows)} 条 → {Path(path).name}', foreground=GREEN)
         except OSError as exc:
             messagebox.showerror('导出失败', str(exc), parent=self.root)
+
+    def add_audit_log(self):
+        selected = filedialog.askopenfilename(parent=self.root, title='选择审计 JSONL 文件',
+                                              filetypes=[('审计 JSONL', '*.jsonl')])
+        if not selected:
+            return
+        path = Path(selected).resolve()
+        settings = load_settings()
+        logs = settings.get('audit_logs', [])
+        logs = logs if isinstance(logs, list) else []
+        logs = [p for p in logs if isinstance(p, str)]
+        if str(path) not in logs:
+            logs.append(str(path))
+        settings['audit_logs'] = logs
+        try:
+            temp = CONFIG_PATH.with_suffix('.tmp')
+            temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
+            temp.replace(CONFIG_PATH)
+        except OSError as exc:
+            messagebox.showerror('保存失败', str(exc), parent=self.root)
+            return
+        if path not in self.monitor.audit_monitor.paths:
+            self.monitor.audit_monitor.paths.append(path)
+        self.view.set('思考审计')
+        self.scope_changed()
 
     def smoke(self):
         # Only our own widgets are exercised; no external application is touched.
@@ -465,13 +607,16 @@ class Desktop:
             assert all(s.client == client for s in self.filtered)
         self.client.set(original)
         self.apply_filters()
-        if self.filtered:
-            self.table.selection_set(self.filtered[0].uid)
+        displayed = self.audit_filtered if self.view.get() == '思考审计' else self.filtered
+        if displayed:
+            self.table.selection_set(displayed[0].uid)
             self.select_row()
-            assert self.filtered[0].session_id in self.detail.cget('text')
+            assert displayed[0].session_id in self.detail.cget('text')
         result['filter_counts'] = counts
         result['table_rows'] = len(self.table.get_children())
         result['chart_points'] = len(self.chart_points)
+        result['view'] = self.view.get()
+        result['audit_summary'] = summarize_audit(self.audit_filtered)
         self.root.update_idletasks()
         result['window_size'] = [self.root.winfo_width(), self.root.winfo_height()]
         result['table_height'] = self.table.winfo_height()
