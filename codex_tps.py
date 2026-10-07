@@ -528,7 +528,8 @@ def main(argv: list[str] | None = None) -> int:
     official.add_argument('--port', type=nonnegative_int, default=8766)
     official.add_argument('--restore', action='store_true', help='恢复本工具写入的临时配置，用于异常退出后恢复')
     official.add_argument('--no-gui', action='store_true', help='仅启动采集服务；Ctrl+C 恢复配置')
-    profiles = sub.add_parser('profiles-audit', help='统一采集默认官方及全部 API/账号 Profiles，关闭后恢复配置')
+    profiles = sub.add_parser('profiles-audit', help='默认采集 API Profiles；可显式包含官方账号，关闭后恢复配置')
+    profiles.add_argument('--include-official', action='store_true', help='本次同时采集默认官方及具名订阅账号；默认关闭')
     profiles.add_argument('--user-home', type=Path, default=Path.home(), help='发现 .codex / .codex-api 的用户目录')
     profiles.add_argument('--state-dir', type=Path, default=APP_DIR / 'audits', help='脱敏日志与 URL 恢复记录目录')
     profiles.add_argument('--port', type=nonnegative_int, default=8766, help='默认官方入口端口；其他入口自动分配')
@@ -552,7 +553,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == 'profiles-audit':
         from profiles_capture import run_profiles_audit
         try:
-            return run_profiles_audit(args.user_home, args.state_dir, port=args.port, restore=args.restore, no_gui=args.no_gui)
+            return run_profiles_audit(args.user_home, args.state_dir, port=args.port, restore=args.restore,
+                                      no_gui=args.no_gui, include_official=args.include_official)
         except (OSError, ValueError, OverflowError):
             print('统一采集无法启动：请检查采集状态或先运行 profiles-audit --restore；未输出配置原文。', file=sys.stderr)
             return 1

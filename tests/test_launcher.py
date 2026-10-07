@@ -51,6 +51,13 @@ class WindowedLauncherTests(unittest.TestCase):
             runpy.run_path(str(entry), run_name='__main__')
         main.assert_called_once_with(['profiles-audit'])
 
+    def test_official_opt_in_is_preserved_when_reusing_window(self):
+        entry = LAUNCHER.with_name('launch.pyw')
+        with patch('sys.argv', [str(entry), 'profiles-audit', '--include-official']), patch('codex_tps.main', return_value=0) as main:
+            runpy.run_path(str(entry), run_name='__main__')
+        main.assert_called_once_with(['profiles-audit', '--include-official'])
+        self.assertIs(self.focus.call_args.kwargs['include_official'], True)
+
 
 @unittest.skipUnless(os.name == 'nt', 'Windows command launcher')
 class LauncherTests(unittest.TestCase):

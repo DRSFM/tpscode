@@ -10,7 +10,9 @@ from window_instance import focus_profiles_window
 
 try:
     arguments = sys.argv[1:] or ['profiles-audit']
-    reused = arguments == ['profiles-audit'] and focus_profiles_window(Path(__file__).resolve().parent / 'audits' / 'profiles-state.json')
+    reusable = arguments in (['profiles-audit'], ['profiles-audit', '--include-official'])
+    reused = reusable and focus_profiles_window(Path(__file__).resolve().parent / 'audits' / 'profiles-state.json',
+                                               include_official='--include-official' in arguments)
     if not reused:
         if sys.stdout is None or sys.stderr is None:
             output = io.StringIO()

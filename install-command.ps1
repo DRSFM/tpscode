@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 # Registers this tool directory. No network or admin rights.
 $tpsBinDir = Join-Path $env:USERPROFILE '.local/bin'
 $tpsCommandPath = Join-Path $tpsBinDir 'tpscode.cmd'
+$tpsShellPath = Join-Path $tpsBinDir 'tpscode'
 $tpsScriptPath = Join-Path $tpsBinDir 'tpscode-launch.ps1'
 $tpsManifestPath = Join-Path $tpsBinDir 'tpscode-install.json'
 $tpsFileNames = @('codex_tps.py', 'desktop.py', 'launch.pyw', 'window_instance.py', 'Start-Codex-TPS.cmd', 'tps.cmd', 'README.md')
@@ -30,7 +31,7 @@ foreach ($tpsFileName in $tpsFileNames) {
         throw "Missing application file: $tpsFileName"
     }
 }
-foreach ($tpsLauncherName in @('global-launch.cmd', 'global-launch.ps1')) {
+foreach ($tpsLauncherName in @('global-launch.cmd', 'global-launch.ps1', 'global-launch.sh')) {
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $tpsLauncherName) -PathType Leaf)) {
         throw "Missing launcher file: $tpsLauncherName"
     }
@@ -40,6 +41,12 @@ if (Test-Path -LiteralPath $tpsCommandPath) {
     $tpsExistingLauncher = Get-Content -LiteralPath $tpsCommandPath -Raw
     if ($tpsExistingLauncher -notmatch '(?m)^rem Managed by Codex TPS\r?$') {
         throw 'An unrelated tpscode.cmd already exists. It has not been changed.'
+    }
+}
+if (Test-Path -LiteralPath $tpsShellPath) {
+    $tpsExistingShell = Get-Content -LiteralPath $tpsShellPath -Raw
+    if ($tpsExistingShell -notmatch '(?m)^# Managed by Codex TPS\r?$') {
+        throw 'An unrelated tpscode shell command already exists. It has not been changed.'
     }
 }
 if (Test-Path -LiteralPath $tpsScriptPath) {
@@ -73,6 +80,7 @@ try {
 }
 Copy-TpsAtomic -tpsCopySource (Join-Path $PSScriptRoot 'global-launch.ps1') -tpsCopyTarget $tpsScriptPath
 Copy-TpsAtomic -tpsCopySource (Join-Path $PSScriptRoot 'global-launch.cmd') -tpsCopyTarget $tpsCommandPath
+Copy-TpsAtomic -tpsCopySource (Join-Path $PSScriptRoot 'global-launch.sh') -tpsCopyTarget $tpsShellPath
 
 $tpsUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $tpsPathParts = @($tpsUserPath -split ';' | Where-Object { $_ })

@@ -4,12 +4,15 @@ import os
 from pathlib import Path
 
 
-def focus_profiles_window(state_path: Path) -> bool:
+def focus_profiles_window(state_path: Path, *, include_official=False) -> bool:
     if os.name != 'nt':
         return False
     try:
         state = json.loads(state_path.read_text(encoding='utf-8'))
         if state.get('schema_version') != 1 or state.get('active') is not True:
+            return False
+        # Legacy collectors include official accounts. Never reuse a different scope silently.
+        if state.get('include_official', True) is not include_official:
             return False
         pid = state.get('pid')
         if type(pid) is not int or pid <= 0:
@@ -35,7 +38,8 @@ def focus_profiles_window(state_path: Path) -> bool:
         if owner.value == pid:
             title = ctypes.create_unicode_buffer(256)
             user32.GetWindowTextW(hwnd, title, len(title))
-            if title.value == 'Codex TPS · 全部 Profiles 审计':
+            if title.value in ('Codex TPS · 全部 Profiles 审计', 'Codex TPS · API Profiles 审计',
+                               'Codex TPS · API 与官方账号审计'):
                 found.append(hwnd)
                 return False
         return True

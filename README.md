@@ -1,6 +1,6 @@
 # Codex TPS
 
-Codex Desktop / CLI 实际会话速度与思考等级审计工具。支持官方账号登录及中转 API 的 Codex 会话，无需在监控窗口登录或填写 API Key，不额外发起测速或模型探测请求。`tpscode` 默认启动全部 Profile 采集，普通只读监控用 `tpscode gui`。TPS 需要会话日志提供真实 token 统计；出站/回显审计需要额外的请求响应证据。
+Codex Desktop / CLI 实际会话速度与思考等级审计工具。支持官方账号登录及中转 API 的 Codex 会话，无需在监控窗口登录或填写 API Key，不额外发起测速或模型探测请求。`tpscode` 默认仅启动 API Profile 采集；官方账号可用 `tpscode profiles-audit --include-official` 显式开启，普通只读监控用 `tpscode gui`。TPS 需要会话日志提供真实 token 统计；出站/回显审计需要额外的请求响应证据。
 
 ## 桌面窗口
 
@@ -12,13 +12,15 @@ Windows 双击 `Start-Codex-TPS.cmd`。可移动整个文件夹后使用。
 tpscode
 ```
 
-它会打开全部 Profile 采集窗口并立即返回终端；已经打开时复用现有窗口，不重复改配置。关闭该窗口会恢复各 Profile 的连接配置。只读监控仍可使用 `tpscode gui`。安装或更新命令入口，在本工具目录运行：
+它会打开 API Profile 采集窗口并立即返回终端；已经打开且采集范围相同时复用现有窗口，不重复改配置。默认官方目录和具名订阅账号不接入代理，其已有日志仍可查看。关闭该窗口会恢复已接入 Profile 的连接配置。切换采集范围前先关闭原采集窗口；官方采集选项只对本次启动有效，不会成为下次默认值。只读监控仍可使用 `tpscode gui`。安装或更新命令入口，在本工具目录运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-command.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install-command.ps1
 ```
 
 命令入口为 `%USERPROFILE%\.local\bin\tpscode.cmd`，旁边的 `tpscode-install.json` 记录本工具目录，`tpscode-launch.ps1` 负责使用该目录中的程序。全局命令直接使用本工具目录，不再依赖 AppData 中的安装副本。请保留整个工具文件夹；移动文件夹后，在新位置重新运行安装命令即可更新记录。仅在命令目录尚未注册时追加用户 PATH，此时需新开终端。
+
+Windows 全局命令使用 PATH 中的 PowerShell 7（`pwsh.exe`）。PowerShell 和 CMD 使用 `tpscode.cmd`；Git Bash 使用同目录的 `tpscode` shell 入口，命令和参数相同。
 
 工具目录中的 `.\tpscode.cmd` 可直接作为便携入口使用。已安装的全局 `tpscode` 根据安装记录找到程序，支持中文和空格路径；找不到程序时会报告记录中的实际目录。
 
@@ -58,7 +60,7 @@ tpscode export --view audit --audit-log 'D:\logs\audit.jsonl' --format json --ou
 
 已添加的审计文件保存在工具目录的 `settings.json` 的 `audit_logs` 中。可在这个列表中移除不再使用的文件；不会删除原日志。终端也支持重复 `--audit-log` 参数，参数可指向单个 JSONL 文件或包含这些文件的目录。
 
-## 一次采集全部 Profiles
+## API 默认采集与可选官方账号采集
 
 Windows 双击 `Start-Codex-TPS.cmd` / `Start-All-Profiles-Audit.cmd`，或直接运行：
 
@@ -66,7 +68,17 @@ Windows 双击 `Start-Codex-TPS.cmd` / `Start-All-Profiles-Audit.cmd`，或直�
 tpscode
 ```
 
-窗口标题为“Codex TPS · 全部 Profiles 审计”。自动发现默认官方目录 `~/.codex`、默认 API 配置根目录 `~/.codex-api`（Profile 为 `default`）、`.codex-api/accounts/*` 和 `.codex-api/profiles/*`，为每个有效的 Responses 配置建立独立本机采集入口，写入同一个 `audits/profiles.jsonl`。官方、账号和 AnyRouter 等 API Profile 的记录一起显示，Profile 列区分来源，可按 Profile 筛选。运行期间每 3 秒检查新建目录；“采集状态”显示已接入和跳过的原因。
+默认窗口标题为“Codex TPS · API Profiles 审计”。自动发现默认 API 配置根目录 `~/.codex-api`（Profile 为 `default`）和 `.codex-api/profiles/*`，为每个有效的 Responses 配置建立独立本机采集入口，写入同一个 `audits/profiles.jsonl`。默认官方目录 `~/.codex`、`.codex-api/accounts/*` 和明确要求 ChatGPT 登录的配置默认显示“未启用”。运行期间每 3 秒检查新建目录；“采集状态”显示已接入和跳过的原因。官方、账号和 API 的历史记录仍一起显示，可按 Profile 筛选。
+
+需要临时采集官方账号时，关闭原采集窗口，再运行：
+
+```powershell
+tpscode profiles-audit --include-official
+```
+
+此时窗口标题为“Codex TPS · API 与官方账号审计”，本次包含默认官方账号及具名订阅账号。关闭后恢复原连接；下次普通 `tpscode` 仍仅采集 API。独立 `tpscode official-audit` 入口继续保留，用于只采集默认官方账号。
+
+具名账号通过新版 apicodex 启动时，需使用全局安装记录指向的本工具及默认 `audits/profiles-state.json`。启动器核对本次显式开启记录、账号目录、官方上游、采集标记和实际监听进程；旧采集记录、自定义 state-dir、不匹配的本地地址或已退出的采集器不会被放行。兼容检查在 Windows 上需要 PowerShell 7 和 Python 3.11+。这些本机记录用于两个工具间的协调，不防范同一系统用户下的恶意软件。
 
 启动后完全退出并重新打开需要采集的客户端，再发送新消息。AnyRouter 仍使用原来的 `apicodex --desktop --api-profile anyrouter` 启动方式。采集窗口保持打开；已有客户端要重新加载连接配置，旧请求不能补采。Desktop / CLI 来源根据客户端发送的标识判断，缺失时显示“其他”。
 
@@ -83,7 +95,7 @@ tpscode profiles-audit --restore
 tpscode audit --audit-log '.\audits\profiles.jsonl' --profile anyrouter
 ```
 
-恢复记录为 `audits/profiles-state.json`，仅含连接字段和恢复标记，不保存完整配置或密钥。统一入口不能与单独官方自动采集同时占用同一个配置；请先关闭旧采集窗口。当前本机接入 16 个有效配置，包括 `default`；此前无效地址的未登记目录已按用户要求移到回收站。第三方服务是否回显思考等级取决于其真实响应，缺少字段时显示“无法审计”。
+恢复记录为 `audits/profiles-state.json`，仅含连接字段、采集范围、进程信息和恢复标记，不保存完整配置或密钥。启用官方采集时，统一入口不能与单独官方自动采集同时占用同一个配置；请先关闭旧采集窗口。第三方服务是否回显思考等级取决于其真实响应，缺少字段时显示“无法审计”。
 
 ## 官方账号桌面真实采集
 

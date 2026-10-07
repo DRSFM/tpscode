@@ -150,3 +150,36 @@ WebSocket 仍未支持。实际内置客户端先出现 501 与重连，随后�
 - 新增临时目录测试验证历史样例真实 TPS=10、保存的日志目录/审计文件仍加载、根目录 default 恢复原始字节、动态扫描遵循指定用户目录；修改前复现两个失败和一个参数缺失。完整 `python -m unittest discover -s tests -q` 97 项通过，无跳过，26.109 秒；编译和差异检查通过。
 - 实际只读 GUI 验证速度统计：近 7 天读取 945 条响应，Desktop 871、CLI 74，扫描 18 个日志文件，无错误；显示最新 300 行、30 个曲线点，汇总识别 933 条有效时间边界，截图与数据一致。见 `restored-tps-gui.json/png`。此截图不使用合成数据，未关闭实际采集窗口。
 - 旧窗口通过恢复命令退出后重新打开新版，当前 PID 48256；新增历史 TPS 读取不产生模型请求。旧请求的 TPS 可正常重读，出站/首包/最终回显不能追溯补采，仍依据已有审计证据判定。
+
+## 2026-10-05 本机安装验收
+
+- 从 `https://github.com/DRSFM/tpscode.git` 拉取到 `E:\新版codex工作区\tpscode`，基于提交 `8e5580f`。
+- Python 3.13.1 和 tkinter 8.6 已存在，无需安装 Python 包；普通终端的 PowerShell 7.6.6 可通过 WindowsApps 中的 `pwsh.exe` 调用。
+- 全局入口改为 PowerShell 7，增加 Git Bash 的无扩展名 shell 入口；两者使用同一份安装记录和源码，未创建 AppData 程序副本。
+- 命令安装到 `C:\Users\SFM\.local\bin`，此目录原已在持久用户 PATH 中。
+- 28 项原有 unittest 全部通过。
+- 在 `C:\Windows\Temp` 使用持久机器/用户 PATH、移除当前 `CODEX_HOME` 后，PowerShell 和 CMD 的帮助、查询，以及 PowerShell 的有限次数持续监控均成功；Git Bash 的命令发现、帮助、中文路径和带空格模型参数也成功。
+- 本机日志解析未报告损坏记录或读取错误。GUI 自动检查加载 70 次响应，筛选、选中行、30 个图表点和表格空间验证通过，错误字段为空。
+- 无参数的全局 `tpscode` 在约 0.78 秒内返回终端，随后确认新的 `Codex TPS · Desktop / CLI` 窗口已打开；保留窗口供用户使用。
+- 以上是本机 Windows 终端验证，未测试 Linux、macOS 或 WSL。
+
+## 2026-10-06 本机远端更新部署
+
+- 本工作区从 `8e5580f` 快进到远端 `79b4468`（Add profile-wide reasoning audit and preserve historical TPS），保留本机 PowerShell 7 与 Git Bash 启动改动；VALIDATION.md 追加冲突已合并，双方历史记录均保留。
+- 更新前的本机文件和已安装入口备份在 `C:\Users\SFM\AppData\Local\CodexTPS\update-backups\20261006-0543f8ca0b9e4f33ab576a55858bc6a0`；另保留 Git stash `2a469de59d540f709506494a4ca52664ecb7d15d`。该备份目录不是运行中的 AppData 程序副本。
+- 重新运行 PowerShell 7 安装器，全局记录继续指向 `E:\新版codex工作区\tpscode`；CMD、PowerShell 和 shell 入口的 SHA256 与源码对应文件一致。
+- 完整 unittest：97 项通过，无跳过，26.339 秒；包含临时目录中的配置接入/恢复、真实本机模拟 HTTP/SSE/WebSocket 及安装客户端隔离配置兼容检查。
+- 在 `C:\Windows\Temp` 使用持久机器/用户 PATH、移除 CODEX_HOME/PYTHONPATH 后，PowerShell 的帮助、list/watch、CMD 的 list、Git Bash 的命令发现和新 audit 子命令均退出 0；中文审计路径正常。
+- 只读速度 GUI 加载最近一天 70 次响应，表格及 30 个图表点正常；只读审计 GUI 读取全部历史 34,578 次响应，显示最新 300 行，错误字段为空。审计检查同时加载仓库中的 6 条明确合成样例；可比回显和降低结果来自样例，不作为真实提供商采集证据。检查报告为 `validation/local-update-speed-smoke.json` 与 `validation/local-update-audit-smoke.json`。
+- 本次部署未在实际用户目录启用或恢复采集。新版无参数 `tpscode` 按远端设计启动全部 Profile 采集，会临时调整连接配置；`tpscode gui` 保留只读模式。无参数分发由隔离启动测试验证，不对当前会话执行该采集入口。
+
+## 2026-10-07 官方账号默认关闭、保留可选采集
+
+- 默认采集跳过 `.codex`、`.codex-api/accounts/*` 及明确要求 ChatGPT 登录的配置；`profiles-audit --include-official` 仅在本次包含官方账号，`official-audit` 独立入口与历史监控保留。
+- 增加采集范围和开始时间到恢复记录；窗口标题、说明和复用检查与范围一致。明确要求 ChatGPT 登录的配置使用官方 ChatGPT 上游，不依赖登录状态探测把未登录的订阅配置错误导向 API 上游。
+- 配套 apicodex 校验仅认可全局安装记录指定的源码、默认恢复记录、显式开启标志、匹配账号/标记/官方上游和实际监听进程；使用 Windows 进程创建时间拒绝复用 PID。该本机协调不构成抵御同一系统用户下恶意进程的安全边界。
+- TPS 全量 pytest：101 passed、4 subtests；apicodex 全量 pytest：398 passed、17 skipped、256 subtests。新用例覆盖默认不读官方认证、动态发现的新账号仍跳过、显式开启后恢复、选项不跨次保留、配置同步和无效采集记录拒绝；原 HTTP/SSE/WebSocket 合成审计回归通过。
+- 隔离临时目录运行实际采集进程（无凭据、无模型请求），实际验证 Windows 进程命令行/创建时间/监听端口、无关 PID 拒绝、官方配置完整恢复及采集进程正常退出。全局命令 help 可见新选项，语法和 diff 检查通过。
+- 安装源码仍为本目录；apicodex 的 `codex_accounts.py` 备份至 `C:/tools/backups/tps-optional-20261007` 后部署，部署哈希一致。两个实际具名账号通过部署入口执行 `features list` 均退出 0，模型、思考等级和认证配置保持。
+- 当前三个官方配置已按原恢复记录撤销代理地址，其他语义保持；10 个 API 配置哈希和原进程的 10 个 API 监听端口保持。仅备份运行模块及无密钥的恢复记录，不复制凭据。机器可读结果：`validation/optional-official-20261007.json`。
+- 现有旧采集进程仍承载 API 流量，未关闭或热替换；其状态窗口可能显示官方配置已修改。下一次关闭旧窗口并实际启动新采集器时，加载默认排除官方的策略。新进程分配端口后，需按原采集流程重启需要采集的客户端。未进行真实模型新回复或 Desktop 完整重启验收。

@@ -34,8 +34,9 @@ class ProfilesCaptureTests(unittest.TestCase):
         path.write_bytes(original)
         return path, original
 
-    def start(self):
-        self.manager = ProfilesCapture(self.user, self.state.parent, official_port=0)
+    def start(self, *, include_official=False):
+        self.manager = ProfilesCapture(self.user, self.state.parent, official_port=0,
+                                       include_official=include_official)
         self.manager.start()
         return self.manager
 
@@ -43,7 +44,7 @@ class ProfilesCaptureTests(unittest.TestCase):
         paths = [self.config('', b'model_provider = "openai"\nmodel = "m"\n'),
                  self.config('work', b'model_provider = "openai"\n', kind='accounts'), self.config('anyrouter')]
         self.assertEqual(len(discover_profiles(self.user)), 3)
-        manager = self.start()
+        manager = self.start(include_official=True)
         self.assertEqual(len(manager.active), 3)
         self.assertEqual({x.profile for x in manager.active}, {'官方', '账号/work', 'anyrouter'})
         for path, _ in paths:
@@ -57,6 +58,38 @@ class ProfilesCaptureTests(unittest.TestCase):
         for path, original in paths:
             self.assertEqual(path.read_bytes(), original)
             self.assertNotIn(b'CODEX TPS STATE', path.read_bytes())
+
+    def test_default_skips_official_accounts_including_new_accounts_without_auth_reads(self):
+        official = self.config('', b'model_provider="openai"\n')
+        account = self.config('work', b'model_provider="openai"\n', kind='accounts')
+        misplaced = self.config('subscription', b'model_provider="openai"\nforced_login_method="chatgpt"\n')
+        self.config('api')
+        with patch('profiles_capture.has_chatgpt_login', side_effect=AssertionError('auth read')):
+            manager = self.start()
+            later = self.config('later', b'model_provider="openai"\n', kind='accounts')
+            manager.scan()
+        self.assertEqual([target.profile for target in manager.active], ['api'])
+        self.assertIs(json.loads(self.state.read_text())['include_official'], False)
+        for path, original in (official, account, misplaced, later):
+            self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(sum(row['state'] == '未启用' for row in manager.status()), 4)
+
+    def test_explicit_official_capture_uses_chatgpt_route_and_records_opt_in(self):
+        self.config('work', b'model_provider="openai"\nforced_login_method="chatgpt"\n', kind='accounts')
+        with patch('profiles_capture.has_chatgpt_login', side_effect=AssertionError('auth read')):
+            self.start(include_official=True)
+        state = json.loads(self.state.read_text())
+        self.assertIs(state['include_official'], True)
+        self.assertTrue(state['started_at'])
+        self.assertEqual(state['entries'][0]['upstream'], 'https://chatgpt.com/backend-api/codex')
+
+    def test_command_line_official_opt_in_is_per_launch(self):
+        from codex_tps import main
+        with patch('profiles_capture.run_profiles_audit', return_value=0) as run:
+            self.assertEqual(main(['profiles-audit', '--include-official']), 0)
+            self.assertIs(run.call_args.kwargs['include_official'], True)
+            self.assertEqual(main(['profiles-audit']), 0)
+            self.assertIs(run.call_args.kwargs['include_official'], False)
 
     def test_invalid_url_is_skipped_and_never_echoed_or_written(self):
         self.config('good')

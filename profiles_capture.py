@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
@@ -196,12 +197,13 @@ def restore_profiles(state_path: Path):
 
 
 class ProfilesCapture:
-    def __init__(self, user_home: Path, state_dir: Path, *, official_port=8766):
+    def __init__(self, user_home: Path, state_dir: Path, *, official_port=8766, include_official=False):
         self.user_home = user_home.expanduser().resolve()
         self.state_dir = state_dir.expanduser().resolve()
         self.state_path = self.state_dir / 'profiles-state.json'
         self.audit_path = self.state_dir / 'profiles.jsonl'
         self.official_port = official_port
+        self.include_official = include_official
         self.token = uuid.uuid4().hex
         self.active: list[Target] = []
         self.skipped = {}
@@ -211,7 +213,8 @@ class ProfilesCapture:
         self.scan_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.watcher = None
-        self.state = dict(schema_version=1, token=self.token, pid=os.getpid(), active=True, entries=[])
+        self.state = dict(schema_version=1, token=self.token, pid=os.getpid(), active=True, entries=[],
+                          include_official=include_official, started_at=datetime.now(timezone.utc).isoformat())
 
     def _save(self):
         _atomic_write(self.state_path, json.dumps(self.state, ensure_ascii=False, indent=2).encode('utf-8'))
@@ -250,6 +253,13 @@ class ProfilesCapture:
                 if self.stop_event.is_set():
                     return
                 key = str(target.home)
+                official_home = (target.home == self.user_home / '.codex' or
+                                 target.home.parent == self.user_home / '.codex-api' / 'accounts')
+                if official_home and not self.include_official:
+                    with self.lock:
+                        self.skipped[key] = dict(profile=target.profile, state='未启用',
+                                                 reason='官方账号默认不采集；需要时使用 --include-official。')
+                    continue
                 with self.lock:
                     if any(x.home == target.home for x in self.active):
                         continue
@@ -270,6 +280,11 @@ class ProfilesCapture:
                         data = tomllib.loads(original.decode('utf-8-sig'))
                     except (ValueError, UnicodeError):
                         raise ValueError('配置格式不受支持；未显示原文。') from None
+                    if data.get('forced_login_method') == 'chatgpt' and not self.include_official:
+                        with self.lock:
+                            self.skipped[key] = dict(profile=target.profile, state='未启用',
+                                                     reason='官方账号默认不采集；需要时使用 --include-official。')
+                        continue
                     if data.get('profile'):
                         raise ValueError('包含旧式 profile 选择，保留原配置。')
                     provider = data.get('model_provider', 'openai')
@@ -279,7 +294,8 @@ class ProfilesCapture:
                         key_path = ['openai_base_url']
                         upstream = data.get('openai_base_url')
                         if upstream is None:
-                            upstream = OFFICIAL_UPSTREAM if has_chatgpt_login(target.home) else 'https://api.openai.com/v1'
+                            upstream = (OFFICIAL_UPSTREAM if data.get('forced_login_method') == 'chatgpt'
+                                        or has_chatgpt_login(target.home) else 'https://api.openai.com/v1')
                     else:
                         info = data.get('model_providers', {}).get(provider, {})
                         if not isinstance(info, dict):
@@ -370,16 +386,18 @@ class ProfilesCapture:
                     target.server.server_close()
 
 
-def run_profiles_audit(user_home: Path, state_dir: Path, *, port=8766, restore=False, no_gui=False):
+def run_profiles_audit(user_home: Path, state_dir: Path, *, port=8766, restore=False, no_gui=False,
+                       include_official=False):
     state_path = state_dir.expanduser().resolve() / 'profiles-state.json'
     if restore:
         results = restore_profiles(state_path)
         print('\n'.join(f'{x["profile"]}：{x["state"]}' for x in results) or '没有本工具的统一采集恢复记录。')
         return 0
-    capture = ProfilesCapture(user_home, state_dir, official_port=port)
+    capture = ProfilesCapture(user_home, state_dir, official_port=port, include_official=include_official)
     try:
         capture.start(watch=True)
-        print('全部 Profiles 审计已启动；各客户端需要重启后加载采集入口。关闭窗口会恢复原连接。', flush=True)
+        scope = 'API 与官方账号' if include_official else 'API Profiles（官方账号未启用）'
+        print(f'{scope}审计已启动；各客户端需要重启后加载采集入口。关闭窗口会恢复原连接。', flush=True)
         if no_gui:
             while not capture.stop_event.wait(1):
                 if not json.loads(state_path.read_text(encoding='utf-8')).get('active'):
@@ -398,7 +416,8 @@ def run_profiles_audit(user_home: Path, state_dir: Path, *, port=8766, restore=F
         monitor.audit_monitor.profile_labels[str(legacy.resolve())] = '官方'
         args = SimpleNamespace(view='audit', audit_status='all', archived=False, client='all', model='',
                                session='', profile='', days=7, smoke_report=None, screenshot=None, fixed_homes=False, user_home=capture.user_home,
-                               profiles_audit=True, profile_names=[x['profile'] for x in capture.status()], capture_status=capture.status)
+                               profiles_audit=True, include_official=include_official,
+                               profile_names=[x['profile'] for x in capture.status()], capture_status=capture.status)
         args.capture_stopped = capture.stop_event.is_set
         return run_gui(monitor, args)
     except KeyboardInterrupt:

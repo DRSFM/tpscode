@@ -67,7 +67,8 @@ class Desktop:
         if args.days not in self.periods.values():
             self.periods[f'最近{args.days:g}天'] = args.days
         self.period = tk.StringVar(value=next(k for k, v in self.periods.items() if v == args.days))
-        root.title('Codex TPS · 全部 Profiles 审计' if getattr(args, 'profiles_audit', False) else
+        capture_scope = 'API 与官方账号审计' if getattr(args, 'include_official', False) else 'API Profiles 审计'
+        root.title('Codex TPS · ' + capture_scope if getattr(args, 'profiles_audit', False) else
                    'Codex TPS · 官方账号真实审计' if getattr(args, 'official_audit', False) else 'Codex TPS · Desktop / CLI')
         width = min(round(1240 * self.ui_scale), root.winfo_screenwidth() - 80)
         height = min(round(860 * self.ui_scale), root.winfo_screenheight() - 100)
@@ -129,7 +130,8 @@ class Desktop:
         top.grid(row=0, column=0, sticky='ew', pady=(0, 20))
         top.columnconfigure(0, weight=1)
         self.label(top, 'Codex TPS', size=25, bold=True).grid(row=0, column=0, sticky='w')
-        caption = ('全部 Profiles · 各桌面重启后开始采集；关闭本窗口恢复连接配置'
+        scope = 'API 与官方账号' if getattr(self.args, 'include_official', False) else 'API Profiles（官方账号未启用）'
+        caption = (scope + ' · 客户端重启后开始采集；关闭本窗口恢复连接配置'
                    if getattr(self.args, 'profiles_audit', False) else
                    '官方账号审计 · 重启官方桌面后发送消息；关闭本窗口会恢复连接配置'
                    if getattr(self.args, 'official_audit', False) else '本地会话监控  /  Desktop + CLI')
