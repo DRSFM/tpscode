@@ -35,9 +35,22 @@ class ProfilesCaptureTests(unittest.TestCase):
         return path, original
 
     def start(self):
-        self.manager = ProfilesCapture(self.user, self.state.parent, official_port=0)
+        self.manager = ProfilesCapture(self.user, self.state.parent, official_port=0, include_accounts=True)
         self.manager.start()
         return self.manager
+
+    def test_default_capture_leaves_account_login_configs_byte_for_byte_unchanged(self):
+        paths = [self.config('', b'model_provider="openai"\nmodel="account-model"\n'),
+                 self.config('work', b'model_provider="openai"\n', kind='accounts'),
+                 self.config('account-with-stale-api-provider', kind='accounts')]
+        self.config('api')
+        self.manager = ProfilesCapture(self.user, self.state.parent, official_port=0)
+        with patch('profiles_capture.has_chatgpt_login', return_value=False):
+            self.manager.start()
+        self.assertEqual([target.profile for target in self.manager.active], ['api'])
+        for path, original in paths:
+            self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(sum(row['state'] == '只读统计' for row in self.manager.status()), 3)
 
     def test_discovery_and_start_cover_official_accounts_and_api_profiles_then_restore_bytes(self):
         paths = [self.config('', b'model_provider = "openai"\nmodel = "m"\n'),
@@ -77,7 +90,8 @@ class ProfilesCaptureTests(unittest.TestCase):
         path = home / 'config.toml'
         original = b'model_provider="apicodex"\n[model_providers.apicodex]\nbase_url="https://gateway.example/v1"\nwire_api="responses"\n'
         path.write_bytes(original)
-        manager = self.start()
+        self.manager = manager = ProfilesCapture(self.user, self.state.parent, official_port=0)
+        manager.start()
         self.assertEqual([x.profile for x in manager.active], ['default'])
         manager.stop()
         self.assertEqual(path.read_bytes(), original)
@@ -101,17 +115,19 @@ class ProfilesCaptureTests(unittest.TestCase):
             self.assertEqual(len(samples), 1)
             self.assertEqual(samples[0].effective_tps, 10)
             self.assertEqual(samples[0].model, 'test-model')
-            self.assertEqual(args.view, 'audit')
+            self.assertEqual(args.view, 'speed')
+            self.assertTrue(args.readonly)
             self.assertFalse(args.fixed_homes)
             self.assertEqual(args.user_home, self.user)
             self.assertIn(extra, monitor.homes)
             self.assertIn(audit, monitor.audit_monitor.paths)
-            self.assertIn(self.state.parent / 'profiles.jsonl', monitor.audit_monitor.paths)
+            self.assertNotIn(self.state.parent / 'profiles.jsonl', monitor.audit_monitor.paths)
             self.assertEqual(monitor.audit_rows[0].profile, 'anyrouter')
             return 0
 
         with patch.dict(os.environ, {'CODEX_HOME': ''}), \
                 patch('codex_tps.load_settings', return_value={'extra_homes': [str(extra)], 'audit_logs': [str(audit)]}), \
+                patch('profiles_capture.start_profiles_service', side_effect=AssertionError('Readonly must not start forwarding')), \
                 patch('desktop.run_gui', side_effect=gui):
             self.assertEqual(run_profiles_audit(self.user, self.state.parent, port=0), 0)
         self.assertEqual(path.read_bytes(), original)
@@ -140,6 +156,33 @@ class ProfilesCaptureTests(unittest.TestCase):
         self.assertIn('https://new.example/v1', changed.read_text())
         self.assertNotIn('CODEX TPS PROFILES AUDIT', changed.read_text())
         self.assertTrue(any(x['state'] == '用户已修改地址' for x in result))
+
+    def test_commented_or_removed_inserted_url_recovers_marker_and_preserves_user_edit(self):
+        path, original = self.config('', b'model_provider="openai"\nmodel="m"\n')
+        manager = self.start()
+        text = path.read_text()
+        generated = next(line for line in text.splitlines(keepends=True) if line.startswith('openai_base_url'))
+        for replacement in ('# ' + generated, ''):
+            with self.subTest(replacement=replacement):
+                path.write_text(text.replace(generated, replacement) + '# user edit\n')
+                state = dict(manager.state)
+                state['active'] = True
+                self.state.write_text(json.dumps(state))
+                result = restore_profiles(self.state)
+                self.assertEqual(result[0]['state'], '用户已移除或注释地址')
+                self.assertEqual(path.read_text(), replacement + original.decode() + '# user edit\n')
+                self.assertFalse(json.loads(self.state.read_text())['active'])
+
+    def test_partial_recovery_keeps_journal_retryable_and_cli_reports_failure(self):
+        path, original = self.config('first')
+        self.start()
+        with patch('profiles_capture._restore_entry', side_effect=OSError('write failure')):
+            self.assertEqual(run_profiles_audit(self.user, self.state.parent, restore=True), 1)
+        self.assertTrue(json.loads(self.state.read_text())['active'])
+        self.assertNotEqual(path.read_bytes(), original)
+        self.assertEqual(run_profiles_audit(self.user, self.state.parent, restore=True), 0)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(json.loads(self.state.read_text())['active'])
 
     def test_preflight_failure_and_concurrent_user_edit_do_not_write_candidate(self):
         path, original = self.config('anyrouter')

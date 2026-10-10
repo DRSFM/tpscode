@@ -67,7 +67,8 @@ class Desktop:
         if args.days not in self.periods.values():
             self.periods[f'最近{args.days:g}天'] = args.days
         self.period = tk.StringVar(value=next(k for k, v in self.periods.items() if v == args.days))
-        root.title('Codex TPS · 全部 Profiles 审计' if getattr(args, 'profiles_audit', False) else
+        root.title('Codex TPS · 日志只读' if getattr(args, 'readonly', False) else
+                   'Codex TPS · 全部 Profiles 审计' if getattr(args, 'profiles_audit', False) else
                    'Codex TPS · 官方账号真实审计' if getattr(args, 'official_audit', False) else 'Codex TPS · Desktop / CLI')
         width = min(round(1240 * self.ui_scale), root.winfo_screenwidth() - 80)
         height = min(round(860 * self.ui_scale), root.winfo_screenheight() - 100)
@@ -129,7 +130,9 @@ class Desktop:
         top.grid(row=0, column=0, sticky='ew', pady=(0, 20))
         top.columnconfigure(0, weight=1)
         self.label(top, 'Codex TPS', size=25, bold=True).grid(row=0, column=0, sticky='w')
-        caption = ('全部 Profiles · 各桌面重启后开始采集；关闭本窗口恢复连接配置'
+        caption = ('账号与 API 日志只读 · 不改请求地址 · 每 2 秒刷新'
+                   if getattr(self.args, 'readonly', False) else
+                   '账号只读 / API 实时 · 关闭统计窗口不会停止 API 采集'
                    if getattr(self.args, 'profiles_audit', False) else
                    '官方账号审计 · 重启官方桌面后发送消息；关闭本窗口会恢复连接配置'
                    if getattr(self.args, 'official_audit', False) else '本地会话监控  /  Desktop + CLI')
@@ -142,7 +145,7 @@ class Desktop:
         self.refresh_button.pack(side='left', padx=(0, 8))
         ttk.Button(actions, text='导出 CSV', command=self.export, style='Accent.TButton').pack(side='left')
         if getattr(self.args, 'official_audit', False) or getattr(self.args, 'profiles_audit', False):
-            ttk.Button(actions, text='停止并恢复配置', command=self.close).pack(side='left', padx=(8, 0))
+            ttk.Button(actions, text='停止并恢复配置', command=getattr(self.args, 'stop_capture', self.close)).pack(side='left', padx=(8, 0))
         if getattr(self.args, 'profiles_audit', False):
             ttk.Button(actions, text='采集状态', command=self.show_capture_status).pack(side='left', padx=(8, 0))
 
@@ -229,11 +232,11 @@ class Desktop:
         table_frame.rowconfigure(0, weight=1)
         table_frame.columnconfigure(0, weight=1)
         self.speed_columns = ('time', 'client', 'profile', 'model', 'effort', 'tps', 'visible', 'output', 'reasoning', 'duration', 'session')
-        self.audit_columns = ('time', 'client', 'profile', 'model', 'outbound', 'first', 'final', 'reasoning', 'audit')
+        self.audit_columns = ('time', 'client', 'profile', 'model', 'effort', 'outbound', 'first', 'final', 'reasoning', 'audit')
         columns = self.speed_columns + ('outbound', 'first', 'final', 'audit')
         self.table = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='browse', height=7)
-        titles = ('完成时间', '客户端', 'Profile', '模型', '模式', '有效 TPS', '可见 TPS', '输出 token', '思考 token', '耗时 / 秒', '会话 ID')
-        widths = (122, 88, 110, 195, 70, 86, 86, 85, 85, 86, 126)
+        titles = ('完成时间', '客户端', 'Profile', '模型', '思考等级（配置）', '有效 TPS', '可见 TPS', '输出 token', '思考 token', '耗时 / 秒', '会话 ID')
+        widths = (122, 88, 110, 195, 130, 86, 86, 85, 85, 86, 126)
         for column, title, width in zip(self.speed_columns, titles, widths):
             self.table.heading(column, text=title)
             self.table.column(column, width=round(width*self.ui_scale), minwidth=round(58*self.ui_scale), anchor='w' if column in ('time', 'client', 'profile', 'model', 'session') else 'e',
@@ -415,6 +418,7 @@ class Desktop:
                 tags = ['even' if i % 2 == 0 else 'odd']
                 if auditing:
                     data = dict(time=local_time(s.completed_at), client=s.client, profile=s.profile or '未记录', model=s.model,
+                                effort=s.configured_effort or '未记录',
                                 outbound=s.outbound_effort or '未采集', first=s.first_display,
                                 final=s.final_effort or '未返回', reasoning=number(s.reasoning_tokens, 0),
                                 audit='  ' + s.audit_result)

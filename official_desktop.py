@@ -100,6 +100,7 @@ class OfficialDesktopCapture:
         self.home, self.audit_path, self.port = home.expanduser().resolve(), audit_path.resolve(), port
         self.server = self.thread = None
         self.token = ''
+        self.guard = None
 
     def start(self):
         try:
@@ -134,6 +135,9 @@ class OfficialDesktopCapture:
                 raise ValueError('当前客户端未通过候选配置的兼容性检查；官方配置未修改。')
             if config.read_bytes() != original:
                 raise ValueError('检查期间官方配置发生变化，已停止接入并保留用户修改。')
+            from capture_guard import CaptureGuard
+            self.guard = CaptureGuard('official', self.home, self.token)
+            self.guard.start()
             _atomic_write(config, proposed)
         except BaseException:
             self.stop()
@@ -150,6 +154,8 @@ class OfficialDesktopCapture:
                     if marker and marker.group(1).decode() == self.token:
                         restore_official_config(self.home)
         finally:
+            if self.guard:
+                self.guard.finish()
             if self.server:
                 self.server.shutdown()
                 self.server.server_close()

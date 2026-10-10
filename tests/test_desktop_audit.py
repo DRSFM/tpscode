@@ -65,6 +65,16 @@ class DesktopAuditTests(unittest.TestCase):
         self.assertEqual(writer.call_args.args[0],self.app.audit_filtered)
         self.assertEqual(writer.call_args.args[2],'json')
 
+    def test_readonly_effort_is_visible_in_both_views_without_request_capture(self):
+        self.assertIn('effort', self.app.table['displaycolumns'])
+        self.assertEqual(self.app.table.set(self.sample.uid, 'effort'), 'xhigh')
+        self.assertEqual(self.app.table.heading('effort')['text'], '思考等级（配置）')
+        self.assertEqual(self.app.table.set(self.sample.uid, 'outbound'), '未采集')
+        self.app.view.set('速度统计')
+        self.app.apply_filters()
+        self.assertEqual(self.app.table.set(self.sample.uid, 'effort'), 'xhigh')
+        self.assertEqual(float(self.app.table.set(self.sample.uid, 'tps')), 10)
+
     def test_external_only_audit_records_are_visible_and_model_choice_exists(self):
         _, evidence = audit_helpers.AuditTests().parse(audit_helpers.request(),audit_helpers.response())
         self.app.samples = []

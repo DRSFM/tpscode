@@ -18,12 +18,16 @@ from urllib.parse import unquote, urlsplit
 import uuid
 
 from audit_capture import create_capture_server
+from capture_guard import CaptureGuard, recover_stale_profiles
+from capture_lock import CaptureLock
+from capture_service import start_profiles_service
 from official_desktop import OFFICIAL_UPSTREAM, _atomic_write, candidate_config_supported, has_chatgpt_login
 from reasoning_audit import profile_from_home
 
 
 MARKER = re.compile(r'\A# CODEX TPS PROFILES AUDIT ([a-f0-9]{32})\r?\n(?:# CODEX TPS STATE [^\r\n]*\r?\n)?')
 LITERAL = r'(?:"(?:[^"\\\r\n]|\\.)*"|\x27[^\x27\r\n]*\x27)'
+RESTORED_STATES = {'已恢复', '用户已修改地址', '用户已移除或注释地址', '标记已移除，未改配置'}
 
 
 def validate_upstream(value):
@@ -150,13 +154,23 @@ def _restore_entry(entry, token):
     if not marker or marker.group(1) != token:
         return '标记已移除，未改配置'
     tail = text[marker.end():]
+    state = '已恢复'
     try:
         start, end, literal, line_start, line_end = _literal_location(tail, entry['key_path'])
         current = tomllib.loads('value=' + literal)['value']
     except (ValueError, TypeError):
-        return '配置格式已变化，需要手动恢复'
-    state = '已恢复'
-    if current == entry['endpoint']:
+        try:
+            data = tomllib.loads(tail)
+        except ValueError:
+            return '配置格式已变化，需要手动恢复'
+        if entry['inserted'] and keys == ['openai_base_url'] and 'openai_base_url' not in data:
+            state = '用户已移除或注释地址'
+            current = None
+        else:
+            return '配置格式已变化，需要手动恢复'
+    if state == '用户已移除或注释地址':
+        pass  # The user already disabled this key; remove only our locator comments.
+    elif current == entry['endpoint']:
         if entry['inserted']:
             # Keep a comment added to our generated line, if any.
             suffix = tail[end:line_end]
@@ -176,11 +190,12 @@ def _restore_entry(entry, token):
 def restore_profiles(state_path: Path):
     if not state_path.is_file() or state_path.is_symlink():
         return []
-    state = json.loads(state_path.read_text(encoding='utf-8'))
+    original_state = state_path.read_bytes()
+    state = json.loads(original_state)
     token = state.get('token', '')
     if state.get('schema_version') != 1 or not re.fullmatch('[a-f0-9]{32}', token):
         raise ValueError('恢复记录格式不受支持；配置未改。')
-    if not state.get('active'):
+    if not state.get('active') and all(x['state'] in RESTORED_STATES for x in state.get('restoration', [])):
         return state.get('restoration', [])
     result = []
     for entry in state.get('entries', []):
@@ -189,19 +204,24 @@ def restore_profiles(state_path: Path):
         except (OSError, ValueError, KeyError, UnicodeError):
             status = '恢复失败，需要检查配置'
         result.append(dict(profile=entry.get('profile', '未记录'), state=status))
-    state['active'] = False
+    state['active'] = any(x['state'] not in RESTORED_STATES for x in result)
     state['restoration'] = result
+    if state_path.read_bytes() != original_state:
+        raise ValueError('恢复记录发生变化，请重新检查配置。')
     _atomic_write(state_path, json.dumps(state, ensure_ascii=False, indent=2).encode('utf-8'))
     return result
 
 
 class ProfilesCapture:
-    def __init__(self, user_home: Path, state_dir: Path, *, official_port=8766):
+    def __init__(self, user_home: Path, state_dir: Path, *, official_port=8766, include_accounts=False):
         self.user_home = user_home.expanduser().resolve()
         self.state_dir = state_dir.expanduser().resolve()
         self.state_path = self.state_dir / 'profiles-state.json'
         self.audit_path = self.state_dir / 'profiles.jsonl'
         self.official_port = official_port
+        self.include_accounts = include_accounts
+        self.guard = None
+        self.owner_lock = None
         self.token = uuid.uuid4().hex
         self.active: list[Target] = []
         self.skipped = {}
@@ -211,20 +231,29 @@ class ProfilesCapture:
         self.scan_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.watcher = None
-        self.state = dict(schema_version=1, token=self.token, pid=os.getpid(), active=True, entries=[])
+        self.state = dict(schema_version=1, token=self.token, pid=os.getpid(), active=True,
+                          scope='all' if include_accounts else 'api', ready=False, entries=[])
 
     def _save(self):
         _atomic_write(self.state_path, json.dumps(self.state, ensure_ascii=False, indent=2).encode('utf-8'))
 
     def start(self, *, watch=False):
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        if self.state_path.exists():
-            previous = json.loads(self.state_path.read_text(encoding='utf-8'))
-            if previous.get('active'):
-                raise ValueError('已有统一采集记录；若原窗口已退出，请先运行 profiles-audit --restore。')
-        self._save()
+        self.owner_lock = CaptureLock(self.state_dir / '.profiles-capture.lock')
+        self.owner_lock.__enter__()
         try:
+            recover_stale_profiles(self.state_path)
+            if self.state_path.exists():
+                previous = json.loads(self.state_path.read_text(encoding='utf-8'))
+                if previous.get('active'):
+                    raise ValueError('已有统一采集记录；若原窗口已退出，请先运行 profiles-audit --restore。')
+            self.guard = CaptureGuard('profiles', self.state_path, self.token)
+            self.guard.start()
+            self._save()
             self.scan()
+            self.state['ready'] = True
+            self.state['status'] = self.status()
+            self._save()
             if watch:
                 def observe():
                     while not self.stop_event.wait(3):
@@ -275,6 +304,12 @@ class ProfilesCapture:
                     provider = data.get('model_provider', 'openai')
                     if not isinstance(provider, str) or not isinstance(data.get('model_providers', {}), dict):
                         raise ValueError('提供商结构无效。')
+                    if not self.include_accounts and (target.home == self.user_home / '.codex'
+                            or target.home.parent == self.user_home / '.codex-api' / 'accounts'
+                            or provider == 'openai' and has_chatgpt_login(target.home)):
+                        with self.lock:
+                            self.skipped[key] = dict(profile=target.profile, state='只读统计', reason='账号登录直接读取会话日志，不接入请求采集。')
+                        continue
                     if provider == 'openai':
                         key_path = ['openai_base_url']
                         upstream = data.get('openai_base_url')
@@ -368,6 +403,10 @@ class ProfilesCapture:
                 for target in self.active:
                     target.server.shutdown()
                     target.server.server_close()
+                if self.guard:
+                    self.guard.finish()
+                if self.owner_lock:
+                    self.owner_lock.__exit__()
 
 
 def run_profiles_audit(user_home: Path, state_dir: Path, *, port=8766, restore=False, no_gui=False):
@@ -375,33 +414,19 @@ def run_profiles_audit(user_home: Path, state_dir: Path, *, port=8766, restore=F
     if restore:
         results = restore_profiles(state_path)
         print('\n'.join(f'{x["profile"]}：{x["state"]}' for x in results) or '没有本工具的统一采集恢复记录。')
-        return 0
-    capture = ProfilesCapture(user_home, state_dir, official_port=port)
-    try:
-        capture.start(watch=True)
-        print('全部 Profiles 审计已启动；各客户端需要重启后加载采集入口。关闭窗口会恢复原连接。', flush=True)
-        if no_gui:
-            while not capture.stop_event.wait(1):
-                if not json.loads(state_path.read_text(encoding='utf-8')).get('active'):
-                    break
-            return 0
-        from codex_tps import Monitor, discover_homes, load_settings
-        from desktop import run_gui
-        legacy = state_dir / 'official-desktop.jsonl'
-        paths = [capture.audit_path] + ([legacy] if legacy.exists() else [])
-        settings = load_settings()
-        extra = [Path(p).expanduser() for p in settings.get('extra_homes', [])]
-        saved_audit = settings.get('audit_logs', [])
-        if isinstance(saved_audit, list):
-            paths += [Path(p).expanduser() for p in saved_audit if isinstance(p, str)]
-        monitor = Monitor(discover_homes(user_home=capture.user_home, extra=extra), audit_paths=paths)
-        monitor.audit_monitor.profile_labels[str(legacy.resolve())] = '官方'
-        args = SimpleNamespace(view='audit', audit_status='all', archived=False, client='all', model='',
-                               session='', profile='', days=7, smoke_report=None, screenshot=None, fixed_homes=False, user_home=capture.user_home,
-                               profiles_audit=True, profile_names=[x['profile'] for x in capture.status()], capture_status=capture.status)
-        args.capture_stopped = capture.stop_event.is_set
-        return run_gui(monitor, args)
-    except KeyboardInterrupt:
-        return 0
-    finally:
-        capture.stop()
+        return int(any(x['state'] not in RESTORED_STATES for x in results))
+    if no_gui:
+        print('TPS 已改为日志只读模式，不再启动转发服务；终端实时监控请使用 tpscode watch。')
+        return 1
+    from codex_tps import Monitor, discover_homes, load_settings
+    from desktop import run_gui
+    settings = load_settings()
+    extra = [Path(p).expanduser() for p in settings.get('extra_homes', []) if isinstance(p, str)]
+    saved_audit = settings.get('audit_logs', [])
+    paths = [Path(p).expanduser() for p in saved_audit if isinstance(p, str)] if isinstance(saved_audit, list) else []
+    user_home = user_home.expanduser().resolve()
+    monitor = Monitor(discover_homes(user_home=user_home, extra=extra), audit_paths=paths)
+    args = SimpleNamespace(view='speed', audit_status='all', archived=False, client='all', model='',
+                           session='', profile='', days=7, smoke_report=None, screenshot=None,
+                           fixed_homes=False, user_home=user_home, readonly=True)
+    return run_gui(monitor, args)

@@ -18,19 +18,19 @@ class WindowedLauncherTests(unittest.TestCase):
         self.focus = focus.start()
         self.addCleanup(focus.stop)
 
-    def test_no_arguments_start_all_profiles_capture(self):
+    def test_no_arguments_start_readonly_gui(self):
         entry = LAUNCHER.with_name('launch.pyw')
         with patch('sys.argv', [str(entry)]), patch('codex_tps.main', return_value=0) as main:
             runpy.run_path(str(entry), run_name='__main__')
-        main.assert_called_once_with(['profiles-audit'])
+        main.assert_called_once_with(['gui'])
 
-    def test_running_capture_window_is_reused_without_starting_another_manager(self):
+    def test_running_legacy_capture_is_not_reused_by_readonly_launcher(self):
         entry = LAUNCHER.with_name('launch.pyw')
         self.focus.return_value = True
         with patch('sys.argv', [str(entry)]), patch('codex_tps.main', return_value=0) as main:
             runpy.run_path(str(entry), run_name='__main__')
-        self.focus.assert_called_once()
-        main.assert_not_called()
+        self.focus.assert_not_called()
+        main.assert_called_once_with(['gui'])
 
     def test_explicit_readonly_gui_does_not_reuse_capture_window(self):
         entry = LAUNCHER.with_name('launch.pyw')
@@ -146,7 +146,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
             self.assertIn('DESKTOP', result.stdout)
 
-    def test_console_fallback_also_starts_all_profiles_capture(self):
+    def test_console_fallback_also_starts_readonly_gui(self):
         with tempfile.TemporaryDirectory(prefix='TPS launch ') as folder:
             base = Path(folder)
             bin_dir = base / 'bin'
@@ -157,7 +157,8 @@ class LauncherTests(unittest.TestCase):
             env = dict(os.environ, PATH=str(bin_dir) + ';' + str(Path(os.environ['SystemRoot']) / 'System32'))
             result = self.launch(path, env=env)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('profiles-audit', result.stdout)
+            self.assertIn('gui', result.stdout)
+            self.assertNotIn('profiles-audit', result.stdout)
 
     def test_missing_app_reports_the_paths_it_checked(self):
         with tempfile.TemporaryDirectory(prefix='TPS launch ') as folder:

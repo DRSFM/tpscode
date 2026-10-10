@@ -15,7 +15,7 @@ if not errorlevel 1 (
 )
 where python >nul 2>nul
 if not errorlevel 1 (
-    python "%~dp0launch.pyw" profiles-audit
+    python "%~dp0launch.pyw" gui
     popd
     exit /b 0
 )

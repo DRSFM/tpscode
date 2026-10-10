@@ -515,20 +515,20 @@ def main(argv: list[str] | None = None) -> int:
     auditing = sub.add_parser('audit', parents=[common], help='查看思考等级审计与配置变化')
     auditing.add_argument('--limit', type=nonnegative_int, default=25)
     auditing.add_argument('--json', action='store_true')
-    capture = sub.add_parser('capture', help='手动启动仅监听本机的 HTTP/SSE/WebSocket 审计采集入口')
+    capture = sub.add_parser('capture', help='旧转发入口已停用；使用 gui / watch 只读日志')
     capture.add_argument('--upstream', required=True, help='实际提供商 API base URL，例如 https://provider.example/v1')
     capture.add_argument('--audit-log', type=Path, required=True, help='写入脱敏审计 JSONL 文件')
     capture.add_argument('--port', type=nonnegative_int, default=8766)
     capture.add_argument('--client', choices=('desktop', 'cli', 'other'), default='other', help='手动标注来源客户端')
     capture.add_argument('--timeout', type=positive_float, default=1800, help='上游读取超时 / 秒')
     capture.add_argument('--profile-name', default='', help='手动采集入口的 Profile 标签')
-    official = sub.add_parser('official-audit', help='临时接入默认官方账号桌面的真实请求，关闭后恢复配置')
+    official = sub.add_parser('official-audit', help='旧账号审计入口：只读日志；--restore 恢复旧配置')
     official.add_argument('--codex-home', type=Path, default=Path.home() / '.codex', help='官方登录目录，默认 ~/.codex')
     official.add_argument('--audit-log', type=Path, default=APP_DIR / 'audits' / 'official-desktop.jsonl')
     official.add_argument('--port', type=nonnegative_int, default=8766)
     official.add_argument('--restore', action='store_true', help='恢复本工具写入的临时配置，用于异常退出后恢复')
     official.add_argument('--no-gui', action='store_true', help='仅启动采集服务；Ctrl+C 恢复配置')
-    profiles = sub.add_parser('profiles-audit', help='统一采集默认官方及全部 API/账号 Profiles，关闭后恢复配置')
+    profiles = sub.add_parser('profiles-audit', help='全部账号/API 日志只读监控；--restore 恢复旧配置')
     profiles.add_argument('--user-home', type=Path, default=Path.home(), help='发现 .codex / .codex-api 的用户目录')
     profiles.add_argument('--state-dir', type=Path, default=APP_DIR / 'audits', help='脱敏日志与 URL 恢复记录目录')
     profiles.add_argument('--port', type=nonnegative_int, default=8766, help='默认官方入口端口；其他入口自动分配')
@@ -557,6 +557,11 @@ def main(argv: list[str] | None = None) -> int:
             print('统一采集无法启动：请检查采集状态或先运行 profiles-audit --restore；未输出配置原文。', file=sys.stderr)
             return 1
     if args.command == 'official-audit':
+        if not args.restore:
+            if args.no_gui:
+                print('TPS 已改为日志只读模式；终端实时监控请使用 tpscode watch。', file=sys.stderr)
+                return 1
+            return main(['gui', '--home', str(args.codex_home)])
         from official_desktop import run_official_audit
         try:
             return run_official_audit(args.codex_home, args.audit_log, args.port,
@@ -565,13 +570,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f'官方桌面审计无法启动：{exc}', file=sys.stderr)
             return 1
     if args.command == 'capture':
-        from audit_capture import run_capture
-        try:
-            return run_capture(args.upstream, args.audit_log, args.port,
-                               {'desktop':'Desktop', 'cli':'CLI', 'other':'Other'}[args.client], args.timeout, args.profile_name)
-        except (OSError, ValueError, OverflowError) as exc:
-            print(f'采集入口无法启动：{exc}', file=sys.stderr)
-            return 1
+        print('TPS 已改为日志只读模式，不再提供请求转发；请使用 tpscode gui / watch。', file=sys.stderr)
+        return 1
     settings = load_settings()
     extra = [Path(p) for p in args.home + settings.get('extra_homes', []) if isinstance(p, str)]
     homes = discover_homes(extra=extra)
@@ -581,6 +581,7 @@ def main(argv: list[str] | None = None) -> int:
     monitor = Monitor(homes, args.archived, audit_paths)
     if args.command == 'gui':
         from desktop import run_gui
+        args.readonly = True
         return run_gui(monitor, args)
     seen: set[str] = set()
     iteration = 0
