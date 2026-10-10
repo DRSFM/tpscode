@@ -15,10 +15,12 @@ tpscode
 它会打开日志只读统计窗口并立即返回终端；账号和 API 的配置保持原样。监控未启动或窗口关闭均不会改变 Codex 的连接。`tpscode gui` 使用同一只读模式。安装或更新命令入口，在本工具目录运行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-command.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\install-command.ps1
 ```
 
 命令入口为 `%USERPROFILE%\.local\bin\tpscode.cmd`，旁边的 `tpscode-install.json` 记录本工具目录，`tpscode-launch.ps1` 负责使用该目录中的程序。全局命令直接使用本工具目录，不再依赖 AppData 中的安装副本。请保留整个工具文件夹；移动文件夹后，在新位置重新运行安装命令即可更新记录。仅在命令目录尚未注册时追加用户 PATH，此时需新开终端。
+
+Windows 全局命令使用 PATH 中的 PowerShell 7（`pwsh.exe`）。PowerShell 和 CMD 使用 `tpscode.cmd`；Git Bash 使用同目录的 `tpscode` shell 入口，命令和参数相同。
 
 工具目录中的 `.\tpscode.cmd` 可直接作为便携入口使用。已安装的全局 `tpscode` 根据安装记录找到程序，支持中文和空格路径；找不到程序时会报告记录中的实际目录。
 

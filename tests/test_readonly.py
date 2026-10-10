@@ -80,6 +80,9 @@ class ReadonlyMonitorTests(unittest.TestCase):
             self.assertEqual(main(['profiles-audit', '--user-home', str(self.user),
                                    '--state-dir', str(self.user / 'audits')]), 0)
             self.assertTrue(gui.call_args.args[1].readonly)
+            self.assertEqual(main(['profiles-audit', '--include-official', '--user-home', str(self.user),
+                                   '--state-dir', str(self.user / 'audits')]), 0)
+            self.assertTrue(gui.call_args.args[1].readonly)
             self.assertEqual(main(['official-audit', '--codex-home', str(self.homes[0])]), 0)
             self.assertTrue(gui.call_args.args[1].readonly)
         for config, original in self.configs.items():
