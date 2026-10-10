@@ -216,7 +216,7 @@ WebSocket 仍未支持。实际内置客户端先出现 501 与重连，随后�
 ## 2026-10-10：TPS 完全关闭时的真实请求与 Git 合并验收
 
 - 关闭本轮只读 TPS 窗口，确认旧采集恢复记录 inactive，原 13 个端口与 8766 无监听。原 API 独立窗口已退出；重新通过 apicodex --desktop --api-profile anyrouter 启动，标题 ChatGPT (anyrouter)，加载原始 AnyRouter 地址。
-- 官方 app-server 使用该 API Profile 的 gpt-6-astra / high 发送“你好”，收到完整回复；同协议默认账号 gpt-6.1-sol / xhigh 完成真实回复。实际 apicodex CLI 菜单 0 → 官方默认账号再次发送“你好”，退出码 0、收到完整回复。三次请求均在 TPS 关闭时进行，请求前后配置哈希一致；启动前后 15 份完整配置哈希不变，AnyRouter 由正常启动同步共享 MCP、通知及项目/界面设置，连接地址、模型和思考等级均不变。API 对话保存在该 Profile 会话目录，并经独立实例启动器请求打开对话；界面可见性未做截图验收。
+- 官方 app-server 使用该 API Profile 的 gpt-6-astra / high 发送“你好”，收到完整回复；同协议默认账号 gpt-6.1-sol / xhigh 完成真实回复。实际 apicodex CLI 菜单 0 → 官方默认账号再次发送“你好”，退出码 0、收到完整回复。三次请求均在 TPS 关闭时进行，请求前后配置哈希一致；启动前后 15 份完整配置哈希不变，AnyRouter 由正常启动同步共享 MCP、通知及项目/界面设置，连接地址、模型和思考等级均不变。API 对话保存在该 Profile 会话目录，并经独立实例启动器请求打开对话；发布后激活该独立窗口，原生窗口截图已确认同名验证对话、用户“你好”及完整回复，输入框模型为 6 Astra / 高。
 - origin/main 有一条 TPS 更新及两条 ApiCodex macOS 更新；保留双方提交历史，合并远端 PowerShell 7/Git Bash 安装支持及 macOS 实现。旧采集默认值、标题和测试按最终只读模式解决；include-official 旧参数仅兼容解析，不开启转发。
 - 合并中测试发现旧 include_official 片段与只读版本的遗留类不兼容，已完整保留此前验证过的遗留恢复实现；最终完整 TPS unittest 109 项通过、28.886 秒。追加旧参数兼容断言后只读专项 3 项通过。ApiCodex 合并后完整 pytest 411 passed、38 skipped、27.07 秒；平台相关跳过保留。两仓库编译与 diff 检查通过。
 - 凭据、会话正文、配置备份、采集状态和本机日志均未纳入 Git；仅源码、测试、说明及既有提交历史推送至两个仓库的 main。远端最终提交 ID 在本次聊天 outputs 的发布报告中核对。
