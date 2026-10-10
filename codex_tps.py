@@ -318,7 +318,8 @@ class Monitor:
         self.errors: list[str] = []
         self.bad_lines = 0
         self.file_count = 0
-        self.audit_monitor = AuditMonitor(audit_paths)
+        self.configured_audit_paths = list(audit_paths or [])
+        self.audit_monitor = AuditMonitor(self.configured_audit_paths)
         self.audit_rows = []
 
     def _paths(self, since: datetime | None):
@@ -390,6 +391,10 @@ class Monitor:
                 if since is None or sample.end_time >= since:
                     unique.setdefault(sample.uid, sample)
         samples = sorted(unique.values(), key=lambda s: (s.completed_at, s.uid), reverse=True)
+        # Discover newly created metadata files on every refresh. The client
+        # writes them independently; TPS never starts or controls collection.
+        native_paths = [home / 'audits' / 'native-reasoning.jsonl' for home in self.homes]
+        self.audit_monitor.paths = self.configured_audit_paths + [p for p in native_paths if p.is_file()]
         self.audit_rows = build_audit_rows(samples, self.audit_monitor.refresh(since))
         self.errors.extend(self.audit_monitor.errors)
         self.bad_lines += self.audit_monitor.bad_lines

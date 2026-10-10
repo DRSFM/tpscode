@@ -220,3 +220,55 @@ WebSocket 仍未支持。实际内置客户端先出现 501 与重连，随后�
 - origin/main 有一条 TPS 更新及两条 ApiCodex macOS 更新；保留双方提交历史，合并远端 PowerShell 7/Git Bash 安装支持及 macOS 实现。旧采集默认值、标题和测试按最终只读模式解决；include-official 旧参数仅兼容解析，不开启转发。
 - 合并中测试发现旧 include_official 片段与只读版本的遗留类不兼容，已完整保留此前验证过的遗留恢复实现；最终完整 TPS unittest 109 项通过、28.886 秒。追加旧参数兼容断言后只读专项 3 项通过。ApiCodex 合并后完整 pytest 411 passed、38 skipped、27.07 秒；平台相关跳过保留。两仓库编译与 diff 检查通过。
 - 凭据、会话正文、配置备份、采集状态和本机日志均未纳入 Git；仅源码、测试、说明及既有提交历史推送至两个仓库的 main。远端最终提交 ID 在本次聊天 outputs 的发布报告中核对。
+
+
+## 2026-10-10：本机 SFM 联合更新与只读切换
+
+- TPS `main` 从 `168e4bc` 快进至 `a705440`；ApiCodex `main` 从 `c0f26c0` 快进至 `16d9d49`。远端历史验收属于其他运行环境，本机以下列实测为准。
+- ApiCodex 本地改动保存在 Git stash `joint-tps-readonly-20261010 preserve local account and delegate changes`，提交标识在 `work/joint-repair-20261010/apicodex-stash.txt`。恢复本地委派、额度保底功能及历史记录，保留远端 CLI 可靠性与 macOS 改动；旧账号 TPS 显式接入补丁不再应用，原始内容仍在 stash。AGENTS.md 的唯一合并冲突已保留双方历史并解决。
+- TPS 恢复预检逐份比较 13 个真实配置的 TOML 语义；仅恢复 10 个 API 的原连接字段，其他字段不变，3 个官方账号配置字节不变。恢复记录单独备份，未复制认证数据；结果在 `work/joint-repair-20261010/recovery-result.json`。
+- 旧采集进程 PID 64028 的命令行、创建时间及窗口归属核对后正常关闭，未强制结束；恢复记录 inactive，原 13 个采集端口无监听。新版默认窗口 PID 8220、标题“Codex TPS · 日志只读”，无监听端口。
+- 安装器成功提示改为 read-only logs；恢复测试的状态读写显式使用 UTF-8，修复中文 Windows 默认 GBK 下首次完整 pytest 的 5 个失败（含子测试）。修复后完整 TPS pytest 109 passed、6 subtests passed，30.20 秒；ApiCodex 完整 pytest 423 passed、38 skipped、258 subtests passed，34.98 秒。
+- 实际全局入口仍为 C:/tools/apicodex.bat；26 个 Python 模块与合并后源码哈希一致，更新 7 个文件（含 2 个新增平台模块）。备份和安装清单在 `C:/tools/backups/tps-readonly-joint-20261010-115728`，摘要在 `work/joint-repair-20261010/deployment-result.json`。预加载 26 个实际安装模块并核对路径后，TPS 清理、账号菜单/账号、CLI 可靠性及委派专项 90 passed、1 skipped、38 subtests passed。
+- 真实 Codex CLI 对 13 个配置执行 features list 均退出 0，配置哈希不变；未发送模型请求。结果在 `work/joint-repair-20261010/config-load-result.json`。
+- 全局 TPS GUI smoke 读取最近 7 天 812 条响应，表格 300 行、曲线 30 点，无错误；真实日志中缺少回显证据的记录保持无法审计。GUI 打开、关闭以及无参数默认启动前后 13 个配置 SHA-256 不变。截图/结果为 `work/joint-repair-20261010/readonly-gui-smoke.png/json`。
+- 已重新部署 PowerShell 7/Git Bash 的 TPS 全局入口，仍指向本仓库；未改认证、登录状态、模型或思考等级，未重启用户 Codex 客户端。已缓存旧 TPS 端口的客户端需彻底退出并重新打开一次。本次本地修改未提交或推送。
+
+### 后续：恢复历史显示及调查新回复的原生取数
+
+- 用户反馈重开后出站/回显不可见。旧 `audits/profiles.jsonl` 仍在，但此前无本地 settings.json，默认 GUI 未加载该审计文件；现已将其绝对路径加入本地 audit_logs。真实历史文件包含 804 个事件（不等于 804 次回复），最后更新为本机 2026-10-10 03:12:30。最近 7 天审计一致筛选实际显示 152 条旧记录，smoke 无错误；报告在 `work/joint-repair-20261010/history-audit-smoke.json`，随后打开历史审计窗口 PID 133020。新回复的出站/回显尚未恢复采集，不能将这次历史显示修复表述为实时审计恢复。
+- 本轮调查读取本地官方手册的诊断及遥测相关段落，并核对官方配置文档与本地官方源码 `7498521`。`sse_event_completed` 中 model_reasoning_effort 来自请求元数据；以出站 low、模拟回显 high 的对照验证，普通遥测仍记录 low，不可作为服务端回显。现用 Desktop 日志的 8 个文件和 14 个原生日志数据库的最近最多 3,000 行均进行了字段存在检查，未输出正文或认证数据；有原始收发记录的数据库条目来自 7–8 月，不能用于新回复。摘要为 `existing-native-log-summary.json`。
+- 隔离 CODEX_HOME、无真实认证、127.0.0.1 模拟 Responses 服务验证：本机 CLI 0.156.0、Desktop 内核 0.162.0-alpha.17.2，以及后者的 app-server JSONL 接口，均请求出站 low、收到模拟 high、退出 0，隔离配置哈希不变。仅启用 `codex_http_client::transport=trace` 与 `codex_api::sse::responses=trace` 即可取到原始两项字段，原生日志数据库中仍未保存这些 HTTP 原始负载。报告为 `native-audit-probe/filtered-result.json`，完整诊断仅留在本项目忽略的 work 下；这些是合成服务验证，不能代表任一真实提供商已通过。
+- WebSocket 模拟验证取到两个内核的原生发送帧和 response.created/completed 回显；解析 Rust 字节转义与 DEFLATE 压缩后，分别还原预热与正式请求的 low，回显为 high，明确排除预热记录。Desktop 内核整轮退出 0；CLI 0.156.0 在该模拟场景超时，虽字段提取成功，仍不视为整轮兼容性验收通过。结果为 `native-audit-probe/websocket-result.json` 与 `websocket-decoded-result.json`。
+- 已只读检查本机 Desktop 包的启动代码：启动端可将 RUST_LOG 传入后台内核，并使用 JSON 格式诊断。可行方向是从客户端自身收集诊断，保持原请求地址，TPS 仅查看提取的字段；原生诊断包含正文和工具内容，不能直接宣称只开日志就满足仅保存元数据。用户已选择“仅必要字段，继续联合修复”，下述原型按此约束实现；未修改生产启动流程、开启生产诊断、增加转发或替换内核。验收边界需包括 TPS 关闭/重开不影响连接、多账号归属、HTTP/WebSocket、重复/预热排除及无字段时无法审计。
+- 调查后重新核对历史修复开始时的 13 份真实配置 SHA-256，均保持不变；原恢复记录仍 inactive。调查与合成验证未向真实模型服务发送推理请求。本轮跟进记录与源码改动仍未提交或推送。
+
+### 仅必要字段诊断原型（接入前阶段记录，现状见下节）
+
+- ApiCodex 新增 `codex_native_audit.py` 与对应测试。Windows 小入口只转交参数、环境和原有标准输入/输出；原生 HTTP/SSE/WebSocket 诊断经内存解析，再写出等级、模型、响应/会话/轮次 ID、来源及时间。文件边界再次白名单过滤，不保存输入、输出、指令、工具内容、reasoning summary 或凭据。诊断写入使用有界队列和进程间追加锁，写入异常不阻断原生请求；重叠未绑定请求不猜配，重复响应及 WebSocket 预热排除。
+- 本机两个真实内核分别执行 exec 和 app-server 的 HTTP 对照，均退出 0、原请求 low、模拟回显 high。Desktop 0.162 内核另经压缩 WebSocket 验证 exec、app-server、无回显三种情况，预热与正式请求分离；只保存正式请求的 3 个事件，无回显保存 null/缺失并保持 unknown。最终版本复验 CLI HTTP、Desktop WebSocket 及无回显均通过；报告在 `work/joint-repair-20261010/metadata-entry-probe/result.json`、`final-result.json`。
+- 新增审计文件没有任何合成正文/摘要标记，app-server 对父进程的 stderr 也无这些标记；HTTP/SSE 原始负载及 WebSocket 原始帧/接收事件在原生日志数据库中计数为 0。CLI exec 的原有可见输入/输出进度仍经标准流显示，不写入新增审计文件；普通原生会话历史属于既有客户端行为，不将其称为新增诊断保存。早期完整合成诊断探测文件未用于新原型采集。
+- TPS 当前显式加载这些元数据文件即能结合真实生成的原生 session 日志，HTTP/WebSocket 各对应 1 条回复，显示 low → high；无回显显示 unknown，读取错误 0。此项只证明数据契约与匹配，不代表生产 TPS 已自动发现新文件；报告为 `tps-integration-result.json`。
+- 17 项原型测试涵盖双重字段限制、错误内容、缺失及冲突等级、并发归属、4 个同 home 写入器的 320 条完整记录、不同 Profile 状态隔离、预热/重复响应、Rust 字节与压缩，以及交互 CLI 参数保留。完整 ApiCodex pytest：440 passed、38 skipped、263 subtests，35.20 秒；TPS 完整 pytest：109 passed、6 subtests，32.53 秒。真实 Windows 包装入口另验证 8 种 Unicode/空格/引号/反斜杠/字面 shell 字符参数及父入口退出后子进程回收，均通过；报告为 `lifecycle/result.json`。另独立只读核对本轮全部隔离原生日志数据库的 HTTP/SSE/WebSocket 原始收发消息计数，均为 0，记录在 `sqlite-diagnostic-retention.json`。
+- 发现覆盖限制：原生 TUI 不提供可收集的收发 stderr；显式 log_dir 会先追加完整文件。用 app-server + --remote 可在后台收集，但本机官方源码将该会话视作 Remote，改变 worktree、resume/fork 权限覆盖、本地工作区及认证含义，故未接入此路线。文件日志导向内存管道的符号链接原型在本机失败（Windows 1314：缺少符号链接权限），未提升权限或改变系统设置。原型的交互 CLI 直接调用原程序并提示未采集。
+- 原型保留在源码中，尚未接入 ApiCodex 正常入口或 C:/tools，TPS 未增加自动发现逻辑。实际 Windows Desktop 的包装启动、包身份/沙盒及多实例窗口仍需进一步验证；后台协议通过不能替代 GUI 启动验收。已集中询问用户是否本轮先覆盖 Desktop/exec、保留交互 CLI 原行为，或继续研究全部入口；该范围选择未收到答复前不进行依赖此选择的正式改写。
+- 最后核对 13 份真实配置字节全部保持，恢复状态 inactive，无测试包装子进程遗留。无真实提供商推理请求、认证写入、用户客户端重启、正式部署、提交或推送。仅必要字段保存方案已得到确认，当前未完成项是覆盖范围与正式接入验收。
+
+### Desktop 与 exec 正式接入和后台部署验收
+
+- 用户明确先修 Desktop 和 exec，普通交互 CLI 继续研究。ApiCodex 的 API、具名订阅账号及官方默认账号 Windows 分支接入原生诊断组件；TPS 每次刷新自动发现各已知 home 的 `audits/native-reasoning.jsonl`，保留手工导入与历史审计。不通过请求转发取数，TPS 不创建或管理收集进程、不改连接配置。
+- 收集文件只含等级、模型、时间、来源与请求/响应/会话/轮次关联 ID。正文诊断在内存过滤，文件边界再次筛选；队列和追加锁有界，失败提示但不阻断模型请求。无法唯一关联的请求保持 unknown。临时启动参数只将 shell 子命令的 RUST_LOG 设为 warn，避免收集 TRACE 扩散至嵌套客户端，不改配置文件中的 shell 设置。
+- Desktop 使用所选应用自己的 bundled codex.exe 与相邻沙盒辅助程序；仅在子进程经 OS 验证有包身份时恢复沙盒包提示。与已验证 0.162 runtime 的 SHA-256 完全相同。Desktop 初始化会将入口保存给辅助 MCP；编译入口在缺少审计上下文时直接退回原生程序，避免辅助调用失败或泄漏诊断。入口关闭通过 Windows Job 回收后代，标准流排空有超时，防止后台子进程持有管道导致 exec 退出挂起。
+- 源码完整测试 447 passed、38 skipped、263 subtests，38.03 秒；TPS 111 passed、6 subtests，31.86 秒。C:/tools 真实模块预加载后的 auth/accounts/native-audit/CLI 专项 117 passed、17 subtests，10.33 秒。新增测试涵盖启动分支上下文、辅助回退、中文 Profile、无采集的普通 CLI、自动发现/重开/去重及同 home 并发写入。Windows 真实入口验证 8 种参数、无上下文辅助调用、持有标准流的后代及入口被关闭后的回收均通过。
+- 源码与 C:/tools 安装副本分别完成 API exec、具名账号 exec、官方默认 exec、同包 Desktop app-server 和缺失回显五项隔离对照，全部退出 0，实际请求 low、回显 high 或缺失；每项 TPS 自动发现 1 条回复，重开后仍为 1 条且读取错误 0。Desktop 入口与测试宿主的 OS 包名一致，临时 shell RUST_LOG 为 warn。所有新增诊断无合成输入/输出/摘要标记，原生 SQLite 的原始 HTTP/SSE 收发计数为 0，隔离配置哈希不变。安装副本再次完成压缩 WebSocket 验证：预热排除、正式回复 3 事件、low → high、无诊断正文。后台报告位于 `work/joint-repair-20261010/background-validation/*-result.json` 和 `metadata-entry-probe/installed-websocket-result.json`。
+- 独立 Desktop 测试窗口实际启动成功，包装入口、Python 收集器及 bundled app-server 全部运行，进入首次引导页；GUI 回复验证没有完成。首次启动由 Desktop 正常初始化功能/MCP/沙盒设置，所以该隔离配置全文件哈希发生变化，不能写成“GUI 启动不改所有配置”。用户指出激活窗口干扰工作后立即停止 computer-use，按唯一测试路径核对并清理 17 个测试进程；后续全部验证均为隐藏后台，不操作用户窗口。
+- 部署仅更新 C:/tools 的 apiagent.py、codex_accounts.py，并新增 codex_native_audit.py；替换前核对安装文件仍等于上轮部署版本，备份到 `C:/tools/backups/native-metadata-desktop-exec-20261010-162239`，复制后哈希相等。TPS 全局入口仍指向本仓库，重开加载新自动发现逻辑；现有 Desktop 需用户方便时通过 ApiCodex 重开，新回复才使用新组件。没有重启用户客户端、发送真实提供商推理请求、修改认证或提交推送。
+- 生产边界：旧采集仍 inactive。本轮未对生产配置执行写入操作；只读复核发现 12/13 份配置哈希保持，tiantiansub2api 的配置在 16:24:11 发生变化，未归因写入来源，也未覆盖或恢复这份变更。连接字段另与旧恢复基线逐项核对，13/13 相等、旧采集地址出现数为 0；结果保存在 `desktop-exec-production-boundary.json`，不能把整文件变化误报为采集改地址。
+- 后续被动实证：只读发现用户新启动的 tiantiansub2api Desktop 已加载 C:/tools 新入口，其进程不属于隔离测试，未结束或操作。自动读取真实新增审计的 48 个事件并与会话关联，显示 16 条 Desktop 审计：14 条真实出站 xhigh、最终回显 xhigh，一致；2 条缺少可靠出站保留 unknown，读取错误 0。没有为这项检查发送任何请求、读取凭据或操作界面；摘要为 `passive-live-audit-summary.json`。这补充证明了实际生产 Desktop 新回复的采集与 TPS 自动发现，仍不声称执行过 GUI 输入框回复测试。
+- 交互 CLI 继续调查：本地官方手册和当前源码确认 TUI 仅显式 log_dir 才启用原文文件诊断，remote 会改变 worktree/resume 语义；OTel 能给会话配置、请求状态和 token，但含工具输出片段，手册未列真实服务端 effort 回显，不能直接满足本次约定。未启用文件日志、remote 或遥测出口，后续需研究原生安全字段接口，避免以配置等级替代真实回显。
+- 原始代码补证：官方源码快照 `7498521` 的 `codex-rs/otel/src/events/session_telemetry.rs:1034`，`sse_event_completed` 只接收用量与首 token 时间，输出的 `model_reasoning_effort` 来自 `self.metadata`，无法据此证明服务端回显；`codex-rs/tui/src/startup_orchestration.rs` 的文件日志 layer 以 append 打开，确认先落原文的风险。
+
+### Git 发布范围核验
+
+- 按用户要求将本轮 Desktop/exec 原生审计、TPS 自动发现、对应测试及说明分别整理为 main 提交。ApiCodex 仅暂存本批 9 个文件，其中 README.md 和 AGENTS.md 只暂存本轮片段；原有委派、额度保底、个人 Skill 与历史验收改动保持未提交，其文件哈希核对不变。TPS 暂存本批 7 个源码、测试及说明文件。运行日志、真实审计、凭据、配置备份及生成入口均未纳入暂存。
+- 从 ApiCodex 暂存树导出独立快照执行完整 pytest：435 passed、38 skipped、246 subtests，35.53 秒。上节 447 passed 是含本机原有委派改动的工作区结果，不能作为本批独立提交的测试数量；TPS 本批源码未再修改，沿用 111 passed、6 subtests。两仓库暂存差异检查通过，远端基线分别为 a705440 / 16d9d49。

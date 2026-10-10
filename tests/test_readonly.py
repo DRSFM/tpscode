@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from codex_tps import main
+from codex_tps import Monitor, main
 from test_core import assistant, event, meta, record, start, usage
 
 
@@ -70,6 +70,46 @@ class ReadonlyMonitorTests(unittest.TestCase):
             self.assertEqual(main(['profiles-audit', '--no-gui', '--user-home', str(self.user),
                                    '--state-dir', str(self.user / 'audits')]), 1)
             self.assertEqual(main(['official-audit', '--no-gui']), 1)
+
+    def test_native_metadata_discovered_after_start_and_reopen_without_config_changes(self):
+        monitor = Monitor(self.homes)
+        monitor.refresh()
+        self.assertFalse(monitor.errors)
+        for i, home in enumerate(self.homes):
+            path = home / 'audits/native-reasoning.jsonl'
+            path.parent.mkdir()
+            base = dict(schema_version=1, source_id=f'client-{i}', request_id=f'request-{i}',
+                        attempt_id='1', timestamp='2026-10-03T12:00:10Z',
+                        protocol='responses', observation_boundary='client_to_provider',
+                        session_id=f'session-{i}', client='Desktop',
+                        profile='官方' if i == 0 else 'api')
+            events = [dict(base, event_type='request_sent', request={'reasoning': {'effort': 'low'}, 'stream': True}),
+                      dict(base, event_type='response_completed', response={'id': f'response-{i}', 'reasoning': {'effort': 'high'}})]
+            path.write_text(''.join(json.dumps(e) + '\n' for e in events), encoding='utf-8')
+        with patch('subprocess.Popen', side_effect=AssertionError('No collector launch')), \
+                patch('socket.socket', side_effect=AssertionError('No network')):
+            for reader in (monitor, Monitor(self.homes)):
+                reader.refresh()
+                self.assertFalse(reader.errors)
+                rows = [r for r in reader.audit_rows if r.outbound_effort]
+                self.assertEqual(len(rows), 2)
+                self.assertEqual({(r.outbound_effort, r.final_effort) for r in rows}, {('low', 'high')})
+                self.assertEqual({r.profile for r in rows}, {'官方', 'api'})
+                self.assertEqual(len({r.home for r in rows}), 2)
+        for config, original in self.configs.items():
+            self.assertEqual(config.read_bytes(), original)
+
+    def test_native_discovery_and_explicit_path_do_not_duplicate_records(self):
+        path = self.homes[0] / 'audits/native-reasoning.jsonl'
+        path.parent.mkdir()
+        path.write_text(json.dumps(dict(schema_version=1, source_id='client', request_id='request',
+            attempt_id='1', timestamp='2026-10-03T12:00:10Z', protocol='responses',
+            observation_boundary='client_to_provider', event_type='response_completed',
+            response={'id': 'response-0', 'reasoning': {'effort': 'high'}})) + '\n', encoding='utf-8')
+        monitor = Monitor(self.homes, audit_paths=[path])
+        monitor.refresh()
+        self.assertEqual(len(monitor.audit_monitor.files), 1)
+        self.assertEqual(len(monitor.audit_monitor.refresh()), 1)
 
     def test_legacy_gui_commands_use_readonly_mode_without_recovery_or_forwarding(self):
         with patch('codex_tps.load_settings', return_value={}), \

@@ -96,7 +96,7 @@ if (-not $tpsPathPresent) {
 if (-not (@($env:Path -split ';' | Where-Object { $_.TrimEnd('\', '/') -eq $tpsBinDir.TrimEnd('\', '/') }).Count -gt 0)) {
     $env:Path = $env:Path.TrimEnd(';') + ';' + $tpsBinDir
 }
-Write-Output 'Installed: tpscode (all-profile capture), tpscode gui, tpscode list, tpscode watch'
+Write-Output 'Installed: tpscode (read-only logs), tpscode gui, tpscode list, tpscode watch'
 Write-Output "App: $PSScriptRoot"
 Write-Output "Command: $tpsCommandPath"
 if (-not $tpsPathPresent) {

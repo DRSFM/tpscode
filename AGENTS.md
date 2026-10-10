@@ -6,6 +6,8 @@
 
 ## 协作修改记录
 
+- 2026-10-10：本机 SFM 联合更新 TPS 至 a705440、ApiCodex 至 16d9d49，恢复 10 个 API 原地址并关闭旧转发，保留本地委派及历史记录。按用户确认的必要字段方案正式接入 Windows Desktop 和 exec/e 的原生内存诊断，TPS 自动发现各 home 的审计文件，缺失回显保持无法审计；普通交互 CLI 保留原生行为并继续研究。源码完整 ApiCodex 447 passed、38 skipped、263 subtests，TPS 111 passed、6 subtests，C:/tools 实际模块专项 117 passed、17 subtests；源码和安装副本各完成五项隔离真实内核对照，出站 low、回显 high/缺失、自动发现及重开均通过，新增诊断无正文标记和原始收发负载。三个运行模块已备份部署，保留包身份及辅助入口回退，Windows 参数透传、标准流退出和子进程回收通过；测试窗口启动成功，未完成界面回复验收。用户指出焦点干扰后立即停用 computer-use 并精确清理测试进程，后续仅隐藏后台验证。生产 13 个路由与恢复基线一致、旧采集 inactive；12 份配置哈希不变，一份验收期间变化未覆盖。仅只读核对用户新启动的真实 Desktop 又读到 16 条审计，14 条出站/回显 xhigh 一致、2 条 unknown，读取错误 0。旧客户端需用户自行通过 ApiCodex 重开，未重启用户客户端。本批按用户要求整理源码、测试与验收记录用于远端发布。 ApiCodex 按暂存内容导出的独立发布快照完整 pytest 435 passed、38 skipped、246 subtests，排除原有未提交委派改动；TPS 沿用本批源码完整 111 passed、6 subtests。详见 VALIDATION.md。
+
 - 2026-10-07：按用户要求整理本机 TPS 改动用于 Git 提交与远端发布，包含可选官方采集、PowerShell 7/Git Bash 启动支持及对应文档和测试；固定 shell 脚本使用 LF，避免 Windows Git 的 CRLF 转换破坏入口。发布前已核对 origin/main、完整差异和 Git 忽略范围；沿用同一代码版本的 101 passed、4 subtests，diff 检查通过。采集日志、恢复状态及本机配置不纳入提交，运行中的采集进程保持。
 
 - 2026-10-07：普通启动默认仅采集 API，新增单次 `profiles-audit --include-official` 并保留独立 `official-audit` 与历史日志；窗口展示当前范围，不复用范围不同的采集窗口。同步 apicodex 具名账号的受限兼容，恢复本机三个官方配置，10 个 API 配置和监听端口保持。TPS 完整 pytest 101 passed、4 subtests，apicodex 398 passed、17 skipped、256 subtests；隔离真实 Windows 进程识别/恢复及两个实际具名账号部署入口 features list 均通过。未发模型请求、未重启现有客户端；旧采集进程暂留，下一次实际启动加载新默认值。详见 VALIDATION.md。

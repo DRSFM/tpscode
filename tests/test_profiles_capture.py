@@ -65,7 +65,7 @@ class ProfilesCaptureTests(unittest.TestCase):
             url = data.get('openai_base_url') if data['model_provider'] == 'openai' else data['model_providers']['apicodex']['base_url']
             self.assertTrue(url.startswith('http://127.0.0.1:'))
             self.assertNotIn('profile', data)
-        self.assertNotIn('PRIVATE_ENV_NAME', self.state.read_text())
+        self.assertNotIn('PRIVATE_ENV_NAME', self.state.read_text(encoding='utf-8'))
         manager.stop()
         for path, original in paths:
             self.assertEqual(path.read_bytes(), original)
@@ -78,7 +78,7 @@ class ProfilesCaptureTests(unittest.TestCase):
         self.assertEqual(len(manager.active), 1)
         self.assertEqual(path.read_bytes(), original)
         self.assertNotIn('sk-', json.dumps(manager.status(), ensure_ascii=False))
-        self.assertNotIn('sk-', self.state.read_text())
+        self.assertNotIn('sk-', self.state.read_text(encoding='utf-8'))
         for url in ('sk-NOT_A_REAL_KEY', 'https://user:password@example.com/v1', 'https://example.com/v1?key=secret', 'https://example.com/sk-NOT_A_REAL_KEY'):
             with self.assertRaises(ValueError) as error:
                 validate_upstream(url)
@@ -167,22 +167,22 @@ class ProfilesCaptureTests(unittest.TestCase):
                 path.write_text(text.replace(generated, replacement) + '# user edit\n')
                 state = dict(manager.state)
                 state['active'] = True
-                self.state.write_text(json.dumps(state))
+                self.state.write_text(json.dumps(state), encoding='utf-8')
                 result = restore_profiles(self.state)
                 self.assertEqual(result[0]['state'], '用户已移除或注释地址')
                 self.assertEqual(path.read_text(), replacement + original.decode() + '# user edit\n')
-                self.assertFalse(json.loads(self.state.read_text())['active'])
+                self.assertFalse(json.loads(self.state.read_text(encoding='utf-8'))['active'])
 
     def test_partial_recovery_keeps_journal_retryable_and_cli_reports_failure(self):
         path, original = self.config('first')
         self.start()
         with patch('profiles_capture._restore_entry', side_effect=OSError('write failure')):
             self.assertEqual(run_profiles_audit(self.user, self.state.parent, restore=True), 1)
-        self.assertTrue(json.loads(self.state.read_text())['active'])
+        self.assertTrue(json.loads(self.state.read_text(encoding='utf-8'))['active'])
         self.assertNotEqual(path.read_bytes(), original)
         self.assertEqual(run_profiles_audit(self.user, self.state.parent, restore=True), 0)
         self.assertEqual(path.read_bytes(), original)
-        self.assertFalse(json.loads(self.state.read_text())['active'])
+        self.assertFalse(json.loads(self.state.read_text(encoding='utf-8'))['active'])
 
     def test_preflight_failure_and_concurrent_user_edit_do_not_write_candidate(self):
         path, original = self.config('anyrouter')
